@@ -5,10 +5,10 @@ in `CLAUDE.md` and `COUNTRY_ADAPTATION_GUIDE.md` — see those for detail. Updat
 items close; it's the single place to check "are we ready to publish" without re-reading
 every workstream's full writeup.
 
-- [ ] **(W0) Repo-publishing structure decided.** Open question, needs a decision from the
-  project owner before Workstream 5 can start: six public repos mirroring today's structure,
-  one consolidated umbrella repo, or six repos plus a thin umbrella meta-repo for docs/quickstart
-  only. All other workstreams are written to work under any of the three.
+- [x] **(W0) Repo-publishing structure decided and built.** Chosen: six independently
+  published component repos plus this thin umbrella meta-repo (docs/quickstart only, no
+  submodules) — [`compliance-platform`](https://gitlab.com/safety-app2/compliance-platform),
+  public, `main`/`develop` model matching the other six repos. Workstream 5 is now unblocked.
 - [ ] **(W1) Legal review complete — hard blocking gate.** Independent of every other
   workstream's progress, this must close before any public push. Two questions for counsel:
   (a) does publishing Compose files that *reference* Alfresco's LGPLv3-family images (ACS,
@@ -68,13 +68,11 @@ every workstream's full writeup.
 
 ## What's actually blocking a public release today
 
-Two things, both requiring a decision or action from the project owner rather than more
-unilateral engineering work:
+One thing, requiring action from the project owner rather than more unilateral engineering
+work:
 
-1. **Commission the legal review (W1)** — the hard gate. Everything else can be ready and
-   this still has to close first.
-2. **Decide the repo-publishing structure (W0)** — unblocks W5, the last workstream still
-   fully undone.
+1. **Commission the legal review (W1)** — the hard gate. Everything else is ready or
+   in progress, and this still has to close first.
 
-Everything else on this list that's marked open is either downstream of those two decisions
-or deliberately scoped out of this release (W8).
+Everything else on this list that's marked open (W5) is downstream of that gate, or
+deliberately scoped out of this release (W8).
