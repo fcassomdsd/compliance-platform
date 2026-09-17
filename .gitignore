@@ -1,0 +1,18 @@
+# Component repos — each is its own independently published repository.
+# This umbrella repo links to them; it does not contain them (no submodules).
+/atrocore-docker/
+/compliance_cmis/
+/compliance_flow/
+/compliance_import/
+/compliance_web/
+/compliance_checklist/
+
+# Internal-only documentation and tooling — never published here.
+# Any future internal-only doc goes in internal/, no per-file entry needed.
+/internal/
+
+# Local tooling/scratch directories.
+/.claude/
+/.e2e-tools/
+/.footprint-audit/
+/.glab-config/
