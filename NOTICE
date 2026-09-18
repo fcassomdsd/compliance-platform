@@ -4,12 +4,12 @@ Copyright 2026 Fernando A. Casso Rodriguez
 This repository contains only original documentation describing the platform
 formed by six independently developed and licensed repositories:
 
-- atrocore-docker    https://gitlab.com/safety-app2/compliance_atrocore
-- compliance_cmis    https://gitlab.com/safety-app2/compliance-cmis
+- atrocore-docker    https://gitlab.com/safety-app2/atrocore-docker
+- compliance_cmis    https://gitlab.com/safety-app2/compliance_cmis
 - compliance_flow    https://gitlab.com/safety-app2/compliance_flow
 - compliance_import  https://gitlab.com/safety-app2/compliance_import
 - compliance_web     https://gitlab.com/safety-app2/compliance_web
-- compliance_checklist  https://gitlab.com/safety-app2/compliance_app
+- compliance_checklist  https://gitlab.com/safety-app2/compliance_checklist
 
 Each of those repositories carries its own LICENSE, NOTICE, and
 THIRD_PARTY_LICENSES.md. Nothing in this repository relicenses or supersedes

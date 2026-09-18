@@ -34,12 +34,12 @@ is the front door that ties them together; it contains no code and no submodules
 
 | Repository | What it is | Stack |
 |---|---|---|
-| [atrocore-docker](https://gitlab.com/safety-app2/compliance_atrocore) | AtroCore/AtroPIM backend — entity store for inspections, inspectors, specialties, locations | Docker Compose, Apache+PHP 8.4, PostgreSQL 15 |
-| [compliance_cmis](https://gitlab.com/safety-app2/compliance-cmis) | Alfresco Content Services customization — content model, Share forms, Web Scripts | Alfresco/ACS, JS Web Scripts, Docker Compose |
+| [atrocore-docker](https://gitlab.com/safety-app2/atrocore-docker) | AtroCore/AtroPIM backend — entity store for inspections, inspectors, specialties, locations | Docker Compose, Apache+PHP 8.4, PostgreSQL 15 |
+| [compliance_cmis](https://gitlab.com/safety-app2/compliance_cmis) | Alfresco Content Services customization — content model, Share forms, Web Scripts | Alfresco/ACS, JS Web Scripts, Docker Compose |
 | [compliance_flow](https://gitlab.com/safety-app2/compliance_flow) | Node-RED integration middleware — the API gateway between the checklist app and AtroCore/Alfresco | Node-RED (flows.json-driven) |
 | [compliance_import](https://gitlab.com/safety-app2/compliance_import) | ZIP ingestion service — validates and stores inspection/follow-up payloads into Alfresco | Python, FastAPI, uvicorn |
 | [compliance_web](https://gitlab.com/safety-app2/compliance_web) | Web UI for inspection/compliance workflows plus auth/session backend | Vue 3 + Vite frontend, Express backend, PostgreSQL |
-| [compliance_checklist](https://gitlab.com/safety-app2/compliance_app) | Offline-capable Electron desktop app for field inspectors | Electron, Vue 3, Node.js, Pinia |
+| [compliance_checklist](https://gitlab.com/safety-app2/compliance_checklist) | Offline-capable Electron desktop app for field inspectors | Electron, Vue 3, Node.js, Pinia |
 
 See `CLAUDE.md`'s "Big-picture architecture" section for how data flows between them.
 
