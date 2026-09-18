@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository structure
 
-This directory is a **collection of independent repositories**, not a monorepo. `compliance_repo` itself is not a git repository — each subdirectory below has its own `.git` and is developed/released independently. Always run `git` commands from inside the relevant subdirectory, and treat cross-repo changes as separate commits/MRs in separate repos.
+This directory is a **collection of independent repositories**, not a monorepo. The workspace root is itself the thin umbrella meta-repo (`compliance-platform`, published as documentation only, no submodules, with the six component directories and `internal/` gitignored) — each subdirectory below has its own `.git` and is developed/released independently. Always run `git` commands from inside the relevant subdirectory, and treat cross-repo changes as separate commits/MRs in separate repos.
 
 | Directory | What it is | Stack |
 |---|---|---|

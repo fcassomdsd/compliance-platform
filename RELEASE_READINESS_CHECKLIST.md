@@ -1,5 +1,7 @@
 # Release-Readiness Checklist
 
+**Last updated:** 2026-09-18.
+
 One line per open-source release workstream. This tracks the same scoping plan referenced
 in `CLAUDE.md` and `COUNTRY_ADAPTATION_GUIDE.md` — see those for detail. Update this file as
 items close; it's the single place to check "are we ready to publish" without re-reading
@@ -15,10 +17,15 @@ every workstream's full writeup.
   Share, Transform Service, Search Services, ActiveMQ) count as "distribution" under LGPLv3,
   and does the clean-room-extension-vs-derivative-work distinction on `compliance_cmis`'s
   customizations matter; (b) AtroCore's own application core (`atrocore/core` and five sibling
-  packages) is GPL-3.0-only and compiled into the built `atro-web` image — the bigger
-  constraint of the two, since it's compiled in rather than referenced. Record the outcome in
-  a new `LICENSING_REVIEW_OUTCOME.md`. Not started — needs a human legal reviewer to
-  commission; nothing further to do here without one.
+  packages) is GPL-3.0-only — historically the bigger constraint of the two, because it was
+  compiled into the built `atro-web` image, though the image no longer contains it (see W5).
+  Record the outcome in a new `LICENSING_REVIEW_OUTCOME.md`. **Engineering-side preparation is
+  done**: `compliance_cmis/THIRD_PARTY_LICENSES.md` and
+  `atrocore-docker/THIRD_PARTY_LICENSES.md` each carry a best-faith worst-case walkthrough of
+  the two questions for counsel (both converging on notice/license-text compliance rather than
+  relicensing), plus the standing constraint "never build or publish a modified Alfresco
+  image". The review itself has not started and needs a human legal reviewer to commission;
+  nothing further to do here without one.
 - [x] **(W1) `THIRD_PARTY_LICENSES.md` populated in all six repos**, each backed by an actual
   dependency/license scan (`license-checker` for the three npm repos, `pip-licenses` for
   `compliance_import`, manual `LICENSE.txt` inspection for `atrocore-docker`'s Composer
@@ -44,27 +51,53 @@ every workstream's full writeup.
   six repo READMEs link to it from their quickstart sections — merged to `develop` in all six
   repos (`atrocore-docker!59`, `compliance_cmis!82`, `compliance_flow!42`,
   `compliance_import!44`, `compliance_web!73`, `compliance_checklist!86`).
-- [ ] **(W5) Public release infrastructure.** W0 is resolved, unblocking this workstream; two
-  of its five sub-items are now done, two remain genuinely blocked on W1 (legal review):
+- [x] **(W5) Public release infrastructure.** W0 is resolved, unblocking this workstream; all
+  five sub-items are now resolved (the last two on 2026-09-18):
   - [x] All six repos CalVer-tagged consistently — `atrocore-docker` and `compliance_import`
-    each cut their first release (`2026-09-18`), matching the other four.
+    each cut their first release (`2026-09-18`), matching the other four. **Update
+    2026-09-18:** four repos could not actually produce a new CalVer tag from their branch —
+    `compliance_web` and `compliance_checklist` had no `## [YYYY-MM-DD]` CHANGELOG section at
+    all, and `compliance_cmis`/`compliance_flow`'s newest dated section was already tagged.
+    All four now carry a dated `## [2026-09-18]` section and `scripts/release-tag.sh` computes
+    a tag; `atrocore-docker`/`compliance_import` need `## [2026-09-18.2]` for a second
+    same-day release. (`compliance_flow` also carries a legacy `2026-09-13` tag with no
+    corresponding CHANGELOG section.)
   - [x] Pre-1.0 vs. 1.0.0 stance decided and documented: **"reference implementation,
     pre-1.0"** — see `README.md`'s Status section. No repo is labeled `1.0.0` for this
     launch; version numbers stay honest about P3 (production-hardening) sitting at 0%.
   - [x] Public CONTRIBUTING.md/CODE_OF_CONDUCT.md pass — all six component repos already had
     both; this umbrella repo was missing `CODE_OF_CONDUCT.md` (now added) and its
     `CONTRIBUTING.md` gained a response-time-expectations note.
-  - [ ] Public CI green from an empty checkout (GitHub Actions mirror of `demo:verify` above
-    all — the single most convincing thing a prospective adopter can watch pass). Not started.
-  - [ ] A decision on pre-built image publishing — **still deliberately waiting on W1's
-    outcome**, since publishing pre-built images could change the LGPLv3 analysis.
-- [x] **(W6) Must-fix tech-debt items closed.** The canonical-import search-index race (now a
-  deterministic node lookup with search as fallback) and the `vso:evidenceReviewStatus`
-  false-enforcement-gate doc claim are both fixed; `API_KEY`-off-by-default is covered by W2.
-  The remaining eight items from the internal technical-debt registry ship as documented known
-  limitations, not blockers — most consequentially, **P3 production-hardening is at 0%** (no
-  Vault, Keycloak, observability, or replication), which is stated prominently in both the
-  adopter doc and the production-configuration doc's own banner.
+  - [x] Public CI green from an empty checkout — **done 2026-09-18.** All six repositories now
+    carry a GitHub Actions mirror of their GitLab validation jobs
+    (`github.com/fcassomdsd/<repo>`), and `atrocore-docker`'s mirror also carries
+    `demo-verify`. All six CI badges read **passing**. Caveat: `demo-verify` is
+    `workflow_dispatch`/`schedule` only in both systems, so the badge proves the gated jobs;
+    the whole-stack guard runs unattended on the weekly schedule.
+  - [x] A decision on pre-built image publishing — **resolved, and the question became moot
+    rather than answered.** The AtroCore application install moved from image-build time to
+    container bootstrap, so the built `atro-web` image no longer contains GPL-3.0 code in any
+    layer (verified by inspecting the built image). There is no longer a GPL-flavored
+    pre-built image to publish, so the LGPLv3 analysis is unchanged and the "combined work"
+    question is closed for these images. Recorded in
+    `atrocore-docker/THIRD_PARTY_LICENSES.md`; W1's remaining questions are unaffected.
+- [x] **(W6) Must-fix tech-debt items closed, plus a 2026-09-18 hardening pass.** The
+  canonical-import search-index race (now a deterministic node lookup with search as fallback)
+  and the `vso:evidenceReviewStatus` false-enforcement-gate doc claim are both fixed;
+  `API_KEY`-off-by-default is covered by W2. A follow-up pass on 2026-09-18 closed the next
+  tier of items from the internal technical-debt registry: the **CAP half** of the
+  search-index race (`findCorrectiveActionByCapId` resolved only through search, now
+  deterministic-first with a CI-visible drift guard on the declaration invariant), the
+  **closure-declaration divergence** (`/api/follow-up/import` did not clear
+  `vso:closureRejectionReason` like the canonical import), `compliance_import`'s
+  `.dockerignore` credential-baking gap and unenforced schema `format` keywords,
+  `compliance_checklist`'s dormant `save/read-alfresco-cred` IPC surface and last
+  hard-coded developer path, and `compliance_web`'s unbounded `auth_session` growth (new
+  cleanup job) and its four duplicated AFTS-escape copies. The remaining items ship as
+  documented known limitations, not blockers — most consequentially, **P3
+  production-hardening is at 0%** (no Vault, Keycloak, observability, or replication), which
+  is stated prominently in both the adopter doc and the production-configuration doc's own
+  banner. Detail: `internal/TECHNICAL_DEBT_ANALYSIS.md`.
 - [ ] **(W8) AtroCore decommissioning path** — explicitly **post-release**, not a gate on this
   launch. Direction agreed (Postgres + a custom lightweight admin UI + endpoints implemented
   directly for what Node-RED needs, migrated incrementally entity-by-entity, leaning on
@@ -76,8 +109,14 @@ every workstream's full writeup.
 One thing, requiring action from the project owner rather than more unilateral engineering
 work:
 
-1. **Commission the legal review (W1)** — the hard gate. Everything else is ready or
-   in progress, and this still has to close first.
+1. **Commission the legal review (W1)** — the hard gate. Everything else is ready: W0 and
+   W2–W6 are closed, and W5's two sub-items that were waiting on W1 are resolved (the public
+   CI mirror is green and the pre-built-image question became moot). The engineering-side
+   preparation for counsel is done; the review itself still has to be commissioned and close
+   first.
 
-Everything else on this list that's marked open (W5) is downstream of that gate, or
-deliberately scoped out of this release (W8).
+W8 (AtroCore decommissioning) is deliberately post-release and is not a gate. The remaining
+known limitations — P3 production-hardening at 0%, the field app's hand-rolled ID regexes,
+`compliance_import`'s partial write idempotency, the `compliance_flow` endpoints still without
+a `catch`, and the deferred follow-up evidence-review redesign — are catalogued in
+`internal/TECHNICAL_DEBT_ANALYSIS.md` and do not block publication.
