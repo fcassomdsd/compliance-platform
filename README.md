@@ -45,9 +45,17 @@ See `CLAUDE.md`'s "Big-picture architecture" section for how data flows between 
 
 ## Status
 
-Pre-release. See `RELEASE_READINESS_CHECKLIST.md` for exactly what's still open before a
-public launch — most notably, a legal review of third-party licensing terms is still pending
-and is a hard blocking gate on any public promotion of this project.
+**Pre-1.0 across the platform, by design — this is a reference implementation, not a
+production-hardened release.** Component version numbers reflect that honestly rather than
+being bumped to imply more stability than exists: `compliance_web` is `0.0.0`,
+`compliance_cmis` is `0.2.0`, and the rest version primarily through dated release tags
+rather than semver. None of the six repositories will be labeled `1.0.0` as part of this
+launch. The reason is concrete, not just caution: production-hardening (Vault, Keycloak,
+observability, database replication) sits at **0% complete** — see `An ideal production
+configuration.md` for the target architecture and `RELEASE_READINESS_CHECKLIST.md` for
+everything else still open before a public launch, most notably a legal review of
+third-party licensing terms that's a hard blocking gate on any public promotion of this
+project.
 
 ## License
 

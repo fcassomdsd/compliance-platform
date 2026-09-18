@@ -6,6 +6,8 @@ platform — it contains no code. If your change is about a specific component's
 (Node-RED flows, the Alfresco content model, the Electron app, etc.), it belongs in that
 component's own repository instead; see the table in [README.md](README.md).
 
+Please read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before participating.
+
 ---
 
 ## 1. Branch workflow
@@ -76,3 +78,9 @@ any component repository's code or third-party dependencies.
 For large or cross-cutting documentation restructuring, open an issue first to align on
 scope before implementing. For a bug or gap in a specific component's behavior, file the
 issue in that component's own repository instead.
+
+**Response-time expectations.** This platform has a small maintainer team; there is no
+guaranteed response time or SLA on issues or merge requests. Expect a best-effort response,
+typically within a couple of weeks — sooner for security-relevant reports. If something
+looks urgent (a security issue, a broken demo path, a licensing concern), say so explicitly
+in the issue title so it doesn't get lost in a general backlog.
