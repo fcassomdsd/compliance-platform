@@ -44,15 +44,20 @@ every workstream's full writeup.
   six repo READMEs link to it from their quickstart sections — merged to `develop` in all six
   repos (`atrocore-docker!59`, `compliance_cmis!82`, `compliance_flow!42`,
   `compliance_import!44`, `compliance_web!73`, `compliance_checklist!86`).
-- [ ] **(W5) Public release infrastructure.** Blocked on W0. Needs: public CI green from an
-  empty checkout under whichever repo structure W0 picks (GitHub Actions mirror of
-  `demo:verify` above all — the single most convincing thing a prospective adopter can watch
-  pass); all six repos CalVer-tagged consistently (`atrocore-docker` and `compliance_import`
-  currently have zero tags despite the shared tooling already working elsewhere); a documented
-  pre-1.0 vs. 1.0.0 stance (recommend "reference implementation, pre-1.0" given
-  `compliance_web` is literally `0.0.0` and P3 is at 0%); a decision on pre-built image
-  publishing, deferred to W1's outcome since it could change the LGPLv3 analysis; a public
-  CONTRIBUTING.md/CODE_OF_CONDUCT.md pass.
+- [ ] **(W5) Public release infrastructure.** W0 is resolved, unblocking this workstream; two
+  of its five sub-items are now done, two remain genuinely blocked on W1 (legal review):
+  - [x] All six repos CalVer-tagged consistently — `atrocore-docker` and `compliance_import`
+    each cut their first release (`2026-09-18`), matching the other four.
+  - [x] Pre-1.0 vs. 1.0.0 stance decided and documented: **"reference implementation,
+    pre-1.0"** — see `README.md`'s Status section. No repo is labeled `1.0.0` for this
+    launch; version numbers stay honest about P3 (production-hardening) sitting at 0%.
+  - [x] Public CONTRIBUTING.md/CODE_OF_CONDUCT.md pass — all six component repos already had
+    both; this umbrella repo was missing `CODE_OF_CONDUCT.md` (now added) and its
+    `CONTRIBUTING.md` gained a response-time-expectations note.
+  - [ ] Public CI green from an empty checkout (GitHub Actions mirror of `demo:verify` above
+    all — the single most convincing thing a prospective adopter can watch pass). Not started.
+  - [ ] A decision on pre-built image publishing — **still deliberately waiting on W1's
+    outcome**, since publishing pre-built images could change the LGPLv3 analysis.
 - [x] **(W6) Must-fix tech-debt items closed.** The canonical-import search-index race (now a
   deterministic node lookup with search as fallback) and the `vso:evidenceReviewStatus`
   false-enforcement-gate doc claim are both fixed; `API_KEY`-off-by-default is covered by W2.
