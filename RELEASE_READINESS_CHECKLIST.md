@@ -113,20 +113,29 @@ every workstream's full writeup.
     English in a Spanish-language product. Asserted by both `fresh-install` CI jobs
     (7 groups / 123 layouts / 8 labels).
   - **Placeholder authority data.** `sql/seed-starter-dataset.sql` +
-    `scripts/seed-starter-dataset.sh` (`make db-seed-starter YES=1`): 11 clearly-marked
-    `starter-` rows across 10 tables showing how a provider, contact, inspector, location
-    service, regulation and article connect, additive and `ON CONFLICT DO NOTHING` so an
-    edit is never overwritten, with `--remove` to delete exactly those rows.
+    `scripts/seed-starter-dataset.sh` (`make db-seed-starter YES=1`): 13 clearly-marked
+    `starter-` rows across 12 tables showing how a provider, contact, inspector, location
+    service, inspection cadence, regulation and article connect, additive and
+    `ON CONFLICT DO NOTHING` so an edit is never overwritten, with `--remove` to delete
+    exactly those rows.
   - **The same records as editable CSV.** `data-packs/` + `scripts/import-data-pack.py`
     (`make import-data-packs`) drives AtroCore's own import module (`ImportFeed` +
     `ImportConfiguratorItem` + `easyCatalog`, no file upload), so an adopter who does not write
     SQL edits a spreadsheet and re-imports; rows upsert on `ID`. `scripts/validate-data-packs.py`
     asserts the packs and the SQL seed write exactly the same ids, and both `fresh-install` CI
     jobs now apply the seed and then import every pack, which is what caught the one real defect
-    here (**`InspectionCadence.inspectedProvider` is a required link to the per-visit
-    `InspectedProvider`, so the seeded cadence was a dangling row** — the cadence was removed
-    from both paths and how to load cadences later is documented). Detail:
-    `data-packs/README.md`, `atrocore-docker/CHANGELOG.md`.
+    here — and it turned out to be a **data-model** defect, not a seeding one:
+    `InspectionCadence.inspectedProvider` was a required link to the per-visit
+    `InspectedProvider`, so a cadence could not exist until a site visit had been planned,
+    even though a cadence is precisely what *causes* the first visit. The cadence was removed
+    from both onboarding paths as a stopgap while the question was referred to the domain
+    owner; it has since been **fixed at the model** — the link now points at
+    `LocationService` (authority data, and the grain that also makes an impossible
+    provider/location/specialty combination unrepresentable), with a migration, a unique
+    index on the natural key, and the cadence restored to both onboarding paths. Two live
+    defects in `compliance_web`'s scheduling job that the same confusion had hidden were
+    fixed alongside. Detail: `data-packs/README.md`, `atrocore-docker/CHANGELOG.md`,
+    `compliance_web/CHANGELOG.md`.
 - [ ] **(W8) AtroCore decommissioning path** — explicitly **post-release**, not a gate on this
   launch. Direction agreed (Postgres + a custom lightweight admin UI + endpoints implemented
   directly for what Node-RED needs, migrated incrementally entity-by-entity, leaning on
