@@ -99,7 +99,12 @@ as a roadmap, not a checklist of what's already built.
 - **Adapting this to your own authority?** [`COUNTRY_ADAPTATION_GUIDE.md`](COUNTRY_ADAPTATION_GUIDE.md)
   walks through every substitution point (branding, specialty catalog, CAP-evaluation
   checklist, provider templates, regulation catalog, site/folder naming) with an effort
-  estimate for each.
+  estimate for each. When you get to entering your own records (locations, providers,
+  contacts, inspectors, regulations), `atrocore-docker/data-packs/README.md` is the fastest
+  route: editable CSV templates for those nine entities, imported through AtroCore's own
+  import module (`make import-data-packs`), with re-import updating rows in place. The same
+  records ship as a seed for `psql` users (`make db-seed-starter YES=1`) — use one or the
+  other, not both.
 - **Evaluating this for a real deployment?** Read `An ideal production configuration.md`
   before committing to anything — the gap between
   "the demo runs" and "this is production-hardened" is real and currently unclosed.

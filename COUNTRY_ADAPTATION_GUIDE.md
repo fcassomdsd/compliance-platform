@@ -95,7 +95,7 @@ Real DR national-regulation text was **never committed to this repository** — 
 
 Recall the citation chain from root `CLAUDE.md`: `UsoapProtocolQuestion → cites → AcapiteOACI (ICAO Annex paragraph) → Normativa (your national regulation article) → ChecklistQuestion`. The ICAO-standard half of that chain — the Annex documents and paragraphs — now ships pre-populated for every adopter via `atrocore-docker/scripts/seed-icao-reference-data.sh` (15 documents, 1,890 paragraphs, 281 Protocol Questions — see root `CLAUDE.md`). **You only need to add your own half**: `Normativa` rows citing your own country's aviation regulations, linked to the existing `AcapiteOACI` paragraphs they implement.
 
-**To adapt**: populate `Normativa` with your own national regulation articles (via the AtroCore admin UI, or a seed script following `seed-demo-dataset.sql`'s pattern), linking each to the relevant pre-seeded `AcapiteOACI` row. This is new data entry, not a schema or code change.
+**To adapt**: populate `Normativa` with your own national regulation articles, linking each to the relevant pre-seeded `AcapiteOACI` row. The quickest route is `atrocore-docker/data-packs/Normativa.csv`: it is a plain CSV template whose `RegulationID` column points at your `Reglamento` row and whose `AnnexParagraphID` column (left empty in the template) takes the `AcapiteOACI` id — import it with `make import-data-packs PACK=normativa`, and re-importing after an edit updates the rows in place. The AtroCore admin UI and a hand-written seed script both work too. This is new data entry, not a schema or code change.
 
 **Effort: low** (per-article data entry effort scales with how much of your regulatory corpus you want cited from day one — the *mechanism* is zero-effort).
 
@@ -125,7 +125,7 @@ The folder *names in Spanish* (`Inspecciones`, `Hallazgos`, etc.) are separate f
 | 3 | Specialty catalog | `sql/seed-nomenclatura-catalog.sql`; `tools/smart-folder-catalog.json` | atrocore-docker; compliance_cmis | Moderate (ID-stability caveat) |
 | 4 | CAP-evaluation checklist | `src/utils/capEvaluationCriteria.js`; `server/domain/capEvaluationCriteria.cjs` | compliance_web | Involved (two files, no shared spec) |
 | 5 | Provider/smart-folder templates | `tools/smart-folder-catalog.json`; `templates/pilot/*.json` | compliance_cmis | Moderate |
-| 6 | Regulation catalog | `Normativa` entity data (new rows, no schema change) | atrocore-docker | Low (mechanism), scales with corpus size |
+| 6 | Regulation catalog | `Normativa`/`Reglamento` entity data via `data-packs/{Reglamento,Normativa}.csv` (or the admin UI; no schema change) | atrocore-docker | Low (mechanism), scales with corpus size |
 | 7 | Site/folder naming | `scripts/bootstrap-site-content.sh`; `webscripts/common/vso-paths.lib.js`; inlined copies (grep `vigilancia-de-la-so`) | compliance_cmis | Involved (inconsistent parameterization) |
 
 A CAA's technical lead can scope their own adaptation project from this table alone, without reading all six repos first.
