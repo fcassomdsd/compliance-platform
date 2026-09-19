@@ -98,6 +98,35 @@ every workstream's full writeup.
   production-hardening is at 0%** (no Vault, Keycloak, observability, or replication), which
   is stated prominently in both the adopter doc and the production-configuration doc's own
   banner. Detail: `internal/TECHNICAL_DEBT_ANALYSIS.md`.
+- [x] **(W7) Adopter onboarding is installable, not hand-entered.** A fresh deployment used to
+  present 32 entities with no menu entry pointing at most of them (AtroCore loads layout
+  *content* from its `layout` table or its own module resources — never from the
+  `metadata/layouts/` that `install-metadata.sh` writes) and no way to load the authority
+  records needed to plan an inspection without reading SQL. Three rounds of work in
+  `atrocore-docker`, all merged to `develop`:
+  - **Navigation and layouts.** `scripts/install-layouts.sh` seeds a `default` layout profile
+    whose menu covers 26 platform entities in 7 groups and materialises all 123 tracked layouts
+    into it via AtroCore's own `PUT /<Entity>/layout/<view>` API (including 9 related-scope
+    panels); the 29 dead `listDashlet` files were dropped. `FindingSeverity` is seeded (A/B/C)
+    because `compliance_web` queries it live, and `scripts/enable-spanish-labels.sh` adds
+    `es_DO` as an additional language and seeds the 8 vocabulary labels that were rendering in
+    English in a Spanish-language product. Asserted by both `fresh-install` CI jobs
+    (7 groups / 123 layouts / 8 labels).
+  - **Placeholder authority data.** `sql/seed-starter-dataset.sql` +
+    `scripts/seed-starter-dataset.sh` (`make db-seed-starter YES=1`): 11 clearly-marked
+    `starter-` rows across 10 tables showing how a provider, contact, inspector, location
+    service, regulation and article connect, additive and `ON CONFLICT DO NOTHING` so an
+    edit is never overwritten, with `--remove` to delete exactly those rows.
+  - **The same records as editable CSV.** `data-packs/` + `scripts/import-data-pack.py`
+    (`make import-data-packs`) drives AtroCore's own import module (`ImportFeed` +
+    `ImportConfiguratorItem` + `easyCatalog`, no file upload), so an adopter who does not write
+    SQL edits a spreadsheet and re-imports; rows upsert on `ID`. `scripts/validate-data-packs.py`
+    asserts the packs and the SQL seed write exactly the same ids, and both `fresh-install` CI
+    jobs now apply the seed and then import every pack, which is what caught the one real defect
+    here (**`InspectionCadence.inspectedProvider` is a required link to the per-visit
+    `InspectedProvider`, so the seeded cadence was a dangling row** — the cadence was removed
+    from both paths and how to load cadences later is documented). Detail:
+    `data-packs/README.md`, `atrocore-docker/CHANGELOG.md`.
 - [ ] **(W8) AtroCore decommissioning path** — explicitly **post-release**, not a gate on this
   launch. Direction agreed (Postgres + a custom lightweight admin UI + endpoints implemented
   directly for what Node-RED needs, migrated incrementally entity-by-entity, leaning on
@@ -110,7 +139,7 @@ One thing, requiring action from the project owner rather than more unilateral e
 work:
 
 1. **Commission the legal review (W1)** — the hard gate. Everything else is ready: W0 and
-   W2–W6 are closed, and W5's two sub-items that were waiting on W1 are resolved (the public
+   W2–W7 are closed, and W5's two sub-items that were waiting on W1 are resolved (the public
    CI mirror is green and the pre-built-image question became moot). The engineering-side
    preparation for counsel is done; the review itself still has to be commissioned and close
    first.
