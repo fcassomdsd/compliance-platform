@@ -37,7 +37,9 @@ It's bind-mounted into the Alfresco container (`docker-compose.yml`: `./configs/
 
 ## 3. Replacing the specialty catalog
 
-The 16 specialty codes (`APR`, `AVIS`, `FAU`, `PAV`, `SSEI`, `AIM`, `ATS`, `COM`, `ECNS`, `EMET`, `FIS`, `MET`, `NAV`, `SAR`, `SUR`, `DPR`) are **this authority's own internal reorganization taxonomy — not an ICAO standard.** Contrast with the USOAP Critical Elements `CE-1`...`CE-8`, which *are* ICAO-standard and need no change.
+The specialty taxonomy is **the adopting authority's own internal reorganization — not an ICAO standard.** Contrast with the USOAP Critical Elements `CE-1`...`CE-8`, which *are* ICAO-standard and need no change.
+
+The reference deployment's taxonomy is **sixteen flat codes** (`APR`, `AVIS`, `FAU`, `PAV`, `SSEI`, `AIM`, `ATS`, `COM`, `ECNS`, `EMET`, `FIS`, `MET`, `NAV`, `SAR`, `SUR`, `DPR`), and a vanilla install no longer ships it: `sql/seed-nomenclatura-catalog.sql` seeds only `ATS`, `NAV` and `MET`, the three the demo and starter datasets reference, because an authority may reasonably have a single *AGA* where the reference has five codes, or no CNS split at all. The sixteen are available as a starting point with `./scripts/seed-nomenclatura.sh --yes --full-specialties` (`make db-seed-nomenclatura YES=1 FULL_SPECIALTIES=1`); anything else you add through the admin UI (the seed replaces the catalog when re-run, so edits made there survive only until the next seed).
 
 They're defined in two places that must be kept in sync:
 - `atrocore-docker/sql/seed-nomenclatura-catalog.sql` — the authoritative seed, loaded into AtroCore's `Specialty` entity.
@@ -45,7 +47,7 @@ They're defined in two places that must be kept in sync:
 
 **Why this matters more than it looks**: the specialty code is the `EEE` segment of *every* generated Nomenclatura document ID (`LV-XXXXT####-EEE`, `H-XXXXT####-EEE-###`, etc. — see root `CLAUDE.md`'s "Nomenclatura document-ID scheme" section). **Changing specialty codes does not retroactively renumber IDs already generated under the old codes.** Decide your specialty taxonomy *before* seeding real inspection data, or accept that historical IDs will carry a code from a taxonomy you've since replaced.
 
-**To adapt**: edit both files' code/name lists to match your authority's own specialty structure, re-run `atrocore-docker/scripts/seed-nomenclatura.sh`, and regenerate the smart-folder templates per `compliance_cmis/tools/`'s own tooling (`generate-smart-folder-templates.js`).
+**To adapt**: decide your taxonomy first, then edit both files' code/name lists (the `\if :{?full_specialties}` block in the seed is where the reference sixteen live, so the default three and your own codes can coexist), re-run `atrocore-docker/scripts/seed-nomenclatura.sh --yes`, and regenerate the smart-folder templates per `compliance_cmis/tools/`'s own tooling (`generate-smart-folder-templates.js`).
 
 **Effort: moderate** — mechanical, but touches two repos and has the ID-stability caveat above.
 
