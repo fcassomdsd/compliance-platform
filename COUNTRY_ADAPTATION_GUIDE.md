@@ -2,11 +2,11 @@
 
 ## 1. Overview
 
-This platform is a **reference implementation**, not a generic multi-tenant product. It was built for one specific civil aviation authority — the Dominican Republic's IDAC (Instituto Dominicano de Aviación Civil) — and that authority's own branding, specialty taxonomy, CAP-evaluation checklist, and provider structure are baked into the code and seed data, not abstracted behind configuration.
+This platform is a **reference implementation**, not a generic multi-tenant product. It was built for one specific civil aviation authority — the Dominican Republic's IDAC (Instituto Dominicano de Aviación Civil) — and most of that authority's own branding, specialty taxonomy, CAP-evaluation checklist, and provider structure are baked into the code and seed data, not abstracted behind configuration. The report headers are now the exception: they are generic by default and fully configuration-driven (§2).
 
 Adapting it for a different CAA is a **configuration and data exercise, not a rewrite**: nothing here requires touching the domain model, the finding/CAP/follow-up lifecycle, the USOAP citation chain, or any webscript's business logic. But it does touch **all six repos**, and some of the substitutions below have real one-way consequences (see §3's warning about document IDs). Budget more than an afternoon — the effort table in §8 gives a per-item estimate, but plan on this being a multi-day project for a first adaptation, most of it in §4 (rebuilding the CAP checklist) and §6 (populating your own national regulation catalog).
 
-The sections below are ordered easiest-to-hardest, so start at the top and stop whenever the remaining sections don't apply to your authority yet (e.g., you can run a fully working demo after §2 alone, with everything else still showing IDAC's data).
+The sections below are ordered easiest-to-hardest, so start at the top and stop whenever the remaining sections don't apply to your authority yet (e.g., you can run a fully working demo after §2 alone, with the reports already carrying your name and logo while everything else still shows the reference data).
 
 **What you get without touching anything**: the ICAO-standard parts. The USOAP Critical Elements (`CE-1`...`CE-8`), the Nomenclatura document-ID scheme's structure (ICAO 4-letter location codes), and — as of this platform's ICAO reference-data seed — the full catalog of ICAO Annex documents, Annex paragraphs, and USOAP Protocol Questions (15 documents / 1,890 paragraphs / 281 questions, `atrocore-docker/scripts/seed-icao-reference-data.sh`) are all genuinely CAA-independent and ship correctly for any authority out of the box. Nothing in this guide touches them.
 
@@ -16,20 +16,26 @@ The sections below are ordered easiest-to-hardest, so start at the top and stop 
 
 **Start here.** This is the one substitution point that's already fully built, parameterized, and requires no code changes — a good confidence-builder before the harder sections.
 
-The file:
+The file (generic defaults shown — this is what a fresh clone ships, not IDAC's values):
 
 ```json
 {
-  "entityName": "DEPARTAMENTO DE CONTROL DE VIGILANCIA SNA/AGA",
-  "entityLogoBase64": "<base64-encoded image>",
-  "docControlCodes": { "informeFinal": "DVSO-CS-F04", "planDeInspeccion": "DVSO-CS-F02" },
-  "docControlVersion": "3.0"
+  "entityName": { "es": "AUTORIDAD DE AVIACIÓN CIVIL", "en": "CIVIL AVIATION AUTHORITY" },
+  "entityLogoPath": "entity-logo.png",
+  "docControlCodes": {
+    "informeFinal": "", "planDeInspeccion": "", "checklistReport": "",
+    "findingReport": "", "followUpReport": ""
+  },
+  "docControlVersion": "",
+  "docControlDate": ""
 }
 ```
 
-It's bind-mounted into the Alfresco container (`docker-compose.yml`: `./configs/entity-profile.json:/usr/local/tomcat/shared/classes/alfresco/extension/entity-profile.json`) and read by `webscripts/common/vso-paths.lib.js`'s `loadEntityProfile()` at template-render time — every generated plan, inspection report, and finding/CAP/follow-up PDF picks these values up. If the file is missing or unreadable, it silently falls back to IDAC's own values (`ENTITY_PROFILE_FALLBACK` in the same file), so a broken edit degrades gracefully rather than breaking report generation.
+It's bind-mounted into the Alfresco container (`docker-compose.yml`: `./configs/entity-profile.json` **and** `./configs/entity-logo.png`, both into `/usr/local/tomcat/shared/classes/alfresco/extension/`) and read by `webscripts/common/vso-paths.lib.js`'s `loadEntityProfile(locale)` at template-render time — every generated plan, inspection report, checklist, finding, and follow-up PDF picks these values up, and all five share one uniform header. `entityName` is locale-keyed (the report request's `locale`, `"en"`/`"es"`, selects the line). The logo is a **drop-in image file** named by `entityLogoPath` (default `entity-logo.png`) — PNG or JPEG; the rendered `draw:mime-type` is detected from the file. If the profile is missing or unreadable, it silently falls back to the same generic defaults, so a broken edit degrades gracefully rather than breaking report generation.
 
-**To adapt**: replace `entityName` with your authority's name, `entityLogoBase64` with your own logo (base64-encoded image data — any format the report templates' image handling accepts), and `docControlCodes`/`docControlVersion` with your own document-control numbering if you have one. Restart the Alfresco container to pick up the change (bind-mounted, but Alfresco doesn't watch the file for live reload).
+`docControlCodes` (one entry per report), `docControlVersion`, and `docControlDate` are **blank by default**. They were originally the authority's printed-form identifiers and revision values (for example IDAC's `DVSO-CS-F04`) and were deliberately left empty so an adopting authority can repurpose them for its own document-control scheme, or leave them out of the header entirely.
+
+**To adapt**: replace `entityName` with your authority's name in each locale you ship, drop your logo over `configs/entity-logo.png` (or point `entityLogoPath` at your own file), and fill in the document-control codes/version/date if you use them. The per-report titles and subtitles live separately, in the locale label dictionaries in the webscripts (`INFORME_FINAL_LABELS`, `PLAN_LABELS`, `REPORT_LABELS`) — edit `docTitle`/`docSubtitle` there to change wording. Restart the Alfresco container to pick up the change (bind-mounted, but Alfresco doesn't watch the file for live reload). After editing any `templates/*.fodt`, re-run `compliance_cmis/scripts/bootstrap-site-content.sh --yes --force` so the instance replaces its already-filed copies.
 
 **Effort: trivial.**
 
@@ -123,7 +129,7 @@ The folder *names in Spanish* (`Inspecciones`, `Hallazgos`, etc.) are separate f
 
 | # | What | File(s) | Repo | Effort |
 |---|---|---|---|---|
-| 2 | Rebranding (name, logo, doc-control codes) | `configs/entity-profile.json` | compliance_cmis | Trivial |
+| 2 | Rebranding (locale-keyed name, drop-in logo, optional doc-control code/version/date; per-report title/subtitle) | `configs/entity-profile.json`; `configs/entity-logo.png`; label dictionaries in the report webscripts | compliance_cmis | Trivial |
 | 3 | Specialty catalog | `sql/seed-nomenclatura-catalog.sql`; `tools/smart-folder-catalog.json` | atrocore-docker; compliance_cmis | Moderate (ID-stability caveat) |
 | 4 | CAP-evaluation checklist | `src/utils/capEvaluationCriteria.js`; `server/domain/capEvaluationCriteria.cjs` | compliance_web | Involved (two files, no shared spec) |
 | 5 | Provider/smart-folder templates | `tools/smart-folder-catalog.json`; `templates/pilot/*.json` | compliance_cmis | Moderate |
