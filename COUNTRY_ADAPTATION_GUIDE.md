@@ -37,6 +37,8 @@ It's bind-mounted into the Alfresco container (`docker-compose.yml`: `./configs/
 
 **To adapt**: replace `entityName` with your authority's name in each locale you ship, drop your logo over `configs/entity-logo.png` (or point `entityLogoPath` at your own file), and fill in the document-control codes/version/date if you use them. The per-report titles and subtitles live separately, in the locale label dictionaries in the webscripts (`INFORME_FINAL_LABELS`, `PLAN_LABELS`, `REPORT_LABELS`) — edit `docTitle`/`docSubtitle` there to change wording. Restart the Alfresco container to pick up the change (bind-mounted, but Alfresco doesn't watch the file for live reload). After editing any `templates/*.fodt`, re-run `compliance_cmis/scripts/bootstrap-site-content.sh --yes --force` so the instance replaces its already-filed copies.
 
+**The checklist app's findings report is a separate substitution point.** `compliance_checklist` generates its findings PDF locally with PDFKit (offline-first — it never talks to Alfresco), so it does not read `entity-profile.json`. It has its own `reportHeader` block in `app.config.json` with the same idea and the same generic defaults: locale-keyed `entityName`/`entitySubtitle`, `logoPath` (drop in your own image), and blank `docControlVersion`/`docControlDate`. If you adapted the server-side branding above, set the same name and logo here too, or the field app's report will keep the generic branding. The report title itself is a locale label in `electron/utils/pdfGenerator.js`.
+
 **Effort: trivial.**
 
 ---
@@ -129,7 +131,7 @@ The folder *names in Spanish* (`Inspecciones`, `Hallazgos`, etc.) are separate f
 
 | # | What | File(s) | Repo | Effort |
 |---|---|---|---|---|
-| 2 | Rebranding (locale-keyed name, drop-in logo, optional doc-control code/version/date; per-report title/subtitle) | `configs/entity-profile.json`; `configs/entity-logo.png`; label dictionaries in the report webscripts | compliance_cmis | Trivial |
+| 2 | Rebranding (locale-keyed name, drop-in logo, optional doc-control code/version/date; per-report title/subtitle) | `configs/entity-profile.json`; `configs/entity-logo.png`; label dictionaries in the report webscripts (server reports); `app.config.json`'s `reportHeader` (checklist findings report) | compliance_cmis; compliance_checklist | Trivial |
 | 3 | Specialty catalog | `sql/seed-nomenclatura-catalog.sql`; `tools/smart-folder-catalog.json` | atrocore-docker; compliance_cmis | Moderate (ID-stability caveat) |
 | 4 | CAP-evaluation checklist | `src/utils/capEvaluationCriteria.js`; `server/domain/capEvaluationCriteria.cjs` | compliance_web | Involved (two files, no shared spec) |
 | 5 | Provider/smart-folder templates | `tools/smart-folder-catalog.json`; `templates/pilot/*.json` | compliance_cmis | Moderate |
