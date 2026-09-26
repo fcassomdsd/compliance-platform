@@ -1,6 +1,6 @@
 # Release-Readiness Checklist
 
-**Last updated:** 2026-09-18.
+**Last updated:** 2026-09-26.
 
 One line per open-source release workstream. This tracks the same scoping plan referenced
 in `CLAUDE.md` and `COUNTRY_ADAPTATION_GUIDE.md` — see those for detail. Update this file as
@@ -142,6 +142,51 @@ every workstream's full writeup.
   Node-RED's role as the integration hub to keep the swap low-disruption for
   `compliance_web`/`compliance_checklist`), but no implementation work has started.
 
+- [ ] **(W9) P3 production hardening — re-planned 2026-09-26, execution starting.** Explicitly
+  **not** a gate on publication (the platform ships as a pre-1.0 reference implementation and says
+  so), but it is now a tracked workstream rather than a standing caveat. The plan in
+  `An ideal production configuration.md` was re-planned to **version 2.0**: the 2026-07-30 draft had
+  drifted into being actively misleading, and its §11 records the corrections. Four were harmful
+  rather than merely stale — it specified a pre-built AtroCore image (which would reintroduce the
+  GPL-3.0 distribution problem W5 closed by moving the install to container bootstrap), the wrong
+  Alfresco image (`alfresco-content-repository-community:23.x` vs. the real
+  `alfresco-governance-repository-community:25.2.0`), a three-VM topology that cannot be deployed
+  because the platform's three shared Docker networks are single-host bridges, and a sizing table
+  that omitted Share, ActiveMQ, transform-core-aio and Traefik (~3.7 GiB of declared limits, in an
+  8 GB VM). Re-planning also surfaced one new blocking defect: **`compliance_cmis`'s Traefik and
+  `compliance_web`'s `prod` profile both bind host port 8080**, so the production profile has never
+  been able to start next to the Alfresco stack — undetected because every documented bring-up uses
+  the `dev` profile on 3000.
+
+  Decisions taken: **single host** (ADR-005, multi-host deferred behind the bridge-network
+  constraint); **Keycloak deferred** to a design spike (ADR-002 revised — an application role does
+  not grant an Alfresco repository permission, so identity migration is not a login swap);
+  **backup-and-verified-restore instead of streaming replication** (ADR-003 revised); and the
+  90-day calendar replaced by **evidence-gated tiers P3.0–P3.7**, each with a runnable exit gate and
+  a CI job, since the work is done by one or two people with automation rather than a 2.5-FTE ops
+  team. Scope also now includes the field app's distribution gap (unsigned portable executable, no
+  publish target, no auto-update) and supply-chain scanning (no repository has any security-scanning
+  job today). **Hard invariant: the lean demo must survive every tier** — `demo:verify` is the
+  per-tier regression gate, and the demo/production split is expressed as compose profiles, never by
+  replacing the demo path.
+
+  **Status: P3.0 and P3.1 complete; P3.2–P3.7 not started.** P3.1 (production secrets) landed as
+  five merge requests. All three services now resolve secrets by the same precedence
+  (`<NAME>_FILE` → `/run/secrets/<name>` → the environment variable), which is the seam a secret
+  manager writes into, and each refuses at startup any value published in these repositories —
+  presence was previously mistaken for secrecy, and the shipped gateway key is known to everyone
+  who has cloned any component repo. `compliance_cmis` no longer falls back to `alfresco`/`secret`
+  when a `.env` is missing; it stops and says which variable is unset.
+  `atrocore-docker/scripts/preflight-secrets.sh` is the gate: `--profile demo` reports the
+  published values and exits 0, `--profile production` refuses them and also catches mismatched
+  gateway keys, short keys, services left in development mode, and insecure session cookies.
+  The demo path is unchanged throughout — verified per repo, and `demo-verify-ci.sh` now asserts
+  both that the demo profile passes and that the production profile refuses the same workspace.
+  **`demo:verify` ran green against all five branches (2026-09-26): 59 checks, 0 failures**, from an
+  isolated workspace so the live environment was untouched — full stack boot, AtroCore install,
+  both imports, the finding at `Pending Closure Approval`, smoke 15/15, envelope 5/5, all four
+  oversight artifacts filed.
+
 ## What's actually blocking a public release today
 
 One thing, requiring action from the project owner rather than more unilateral engineering
@@ -153,7 +198,9 @@ work:
    preparation for counsel is done; the review itself still has to be commissioned and close
    first.
 
-W8 (AtroCore decommissioning) is deliberately post-release and is not a gate. The remaining
+W8 (AtroCore decommissioning) is deliberately post-release and is not a gate. Neither is W9 (P3
+production hardening) — it is now planned and starting, but the platform publishes as a pre-1.0
+reference implementation that states its hardening status plainly. The remaining
 known limitations — P3 production-hardening at 0%, the field app's hand-rolled ID regexes,
 `compliance_import`'s partial write idempotency, the `compliance_flow` endpoints still without
 a `catch`, and the deferred follow-up evidence-review redesign — are catalogued in
