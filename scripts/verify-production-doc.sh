@@ -139,19 +139,29 @@ else
   fi
 fi
 
-banner "Hardening claims — these must stay FALSE until the tiers land"
-# The document asserts P3 is 0% implemented. If that stops being true, the
-# document is the thing that is now wrong, so fail and force an update.
+banner "Hardening claims match the tree"
+# P3.2 landed, so the document now claims hardening EXISTS. This check runs in
+# the opposite direction to the one it replaced: it fails if the hardening is
+# removed while the document still advertises it.
 HARDENED=$(grep -lE '^\s*(read_only:|cap_drop:)' \
              */docker-compose*.y*ml compliance_cmis/commons/base.yaml 2>/dev/null | wc -l)
-if [ "$HARDENED" -gt 0 ]; then
-  red "  NOTE  read_only/cap_drop now present in $HARDENED compose file(s) —"
-  red "        P3.2 has started; update the document's status banner and §4.4."
-  FAILED=$((FAILED + 1))
-  CHECKS=$((CHECKS + 1))
-else
-  ok "container hardening not yet started, as the document states" 0
-fi
+[ "$HARDENED" -ge 3 ]
+ok "read_only/cap_drop present in $HARDENED compose files (document claims P3.2 done)" $?
+
+# Every service should declare no-new-privileges. This is the control that
+# applies everywhere, so a service missing it is a genuine gap rather than a
+# documented exception.
+NNP=$(grep -c 'no-new-privileges' */docker-compose*.y*ml 2>/dev/null | awk -F: '{t+=$2} END {print t+0}')
+[ "$NNP" -ge 10 ]
+ok "no-new-privileges declared $NNP times across the compose files" $?
+
+# Digest pinning: the document's image inventory says every external image is
+# pinned, so an unpinned one means the two have drifted.
+UNPINNED=$(grep -hoE '^\s*image:\s+[a-z0-9./_-]+:[a-zA-Z0-9._-]+\s*$' \
+             */docker-compose*.y*ml compliance_cmis/commons/base.yaml 2>/dev/null \
+           | grep -v '@sha256' | grep -vc 'compliance-web-backend:local' || true)
+[ "${UNPINNED:-0}" -eq 0 ]
+ok "every external image reference is digest-pinned" $?
 
 banner "Result"
 if [ "$FAILED" -eq 0 ]; then

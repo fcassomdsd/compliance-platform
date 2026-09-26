@@ -4,11 +4,14 @@
 **Audience**: Technical stakeholders, operations team, project sponsors
 **Last substantive revision**: 2026-09-26 (re-planned against the current tree; supersedes the 2026-07-30 1.0-draft)
 
-**Status**: **Design/roadmap — 0% implemented.** None of the components below (Vault, Keycloak,
-PostgreSQL replication, Prometheus/Grafana/Loki, ClamAV, image scanning/signing) exist yet. The
-actual running systems today are the single-host Docker Compose setups documented per-repo and the
+**Status**: **Partially implemented — P3.0, P3.1 and P3.2 are done; P3.3–P3.7 are not started.**
+Landed so far: secrets resolve from files with production refusing published values, a profile-aware
+credential preflight, digest-pinned images everywhere, hash-pinned Python dependencies, Trivy
+scanning and SBOM generation in all six pipelines, and container hardening. **Still absent**: Vault,
+Keycloak, PostgreSQL replication, Prometheus/Grafana/Loki, ClamAV, TLS, backup automation and image
+signing. The running systems are single-host Docker Compose setups per repo plus the
 `atrocore-docker` demo stack described in the root `CLAUDE.md`. This document is the **P3** milestone
-plan. If you are adapting this platform for a different civil aviation authority before thinking
+plan; each tier in §6 records its own status. If you are adapting this platform for a different civil aviation authority before thinking
 about production deployment, read `COUNTRY_ADAPTATION_GUIDE.md` first — this document assumes the
 content/branding/specialty adaptation is already done and is about infrastructure, not configuration.
 
@@ -313,17 +316,33 @@ untracked, ignored, rotated and **purged from git history** (verified — zero c
 
 ### 4.4 Container Security
 
-Current state: **zero** `deploy.resources`, `user:`, `read_only:` or `cap_drop` in any of the six
-compose files, and every image pinned by mutable tag with no digest anywhere. One exception worth
-reusing as the reference: `compliance_import/Dockerfile` already does `USER appuser`.
+**Done in P3.2 (2026-09-26).** Before that tier there were **zero** `deploy.resources`, `user:`,
+`read_only:` or `cap_drop` declarations anywhere, and every image was pinned by mutable tag with no
+digest.
 
-Target: resource limits, non-root users, read-only root filesystems with explicit `tmpfs` mounts,
-`cap_drop: [ALL]`, restart policies, digest-pinned images, and no Docker socket mounted into any
-container that does not require it (§4.6).
+Now: every external image is digest-pinned; every service declares resource limits, a restart
+policy and `no-new-privileges`; and read-only rootfs, non-root `user:` and `cap_drop: ALL` are
+applied wherever the service can take them — `compliance_import` and `compliance_web`'s backend and
+migrate job, each verified by booting it.
 
-**Expect friction here.** Three bootstrap scripts exist precisely because containers write into
-bind mounts they do not own; adding `user:` collides with that directly. Harden one service per
-commit, with `demo:verify` after each.
+Where a control is **not** applied, the compose file states why, because "absent" and "impossible"
+are different facts and a reviewer should not have to rediscover which is which:
+
+| Service | Not applied | Why |
+|---|---|---|
+| Postgres (×3) | `read_only`, `cap_drop: ALL` | Chowns its data directory and drops privileges at startup |
+| Node-RED | `read_only`, `user:` | Writes `flows.json`/`flows_cred.json` into a bind mount — that is the deployment model |
+| `atro-web` | `read_only`, `user:` | Installs AtroCore into a bind mount at first run; Apache binds `:80` as root |
+| Alfresco, Solr, Share, ActiveMQ, transform | `read_only`, `user:` | JVM services writing caches, logs and indexes inside their own filesystems |
+| nginx (`frontend-prod`) | `read_only`, `user:` | Needs `NET_BIND_SERVICE` + `CHOWN`/`SETUID`/`SETGID`; deferred to P3.3, which changes its listen port anyway |
+
+The friction anticipated here was real: the three bootstrap scripts exist because containers write
+into bind mounts they do not own, and that is exactly what makes `user:` inapplicable to half the
+stack.
+
+Still outstanding: the Docker socket is mounted into the Traefik proxy (read-only). Removing that
+dependency means replacing Docker service discovery with static configuration — a P3.3 question,
+since that tier reworks the edge.
 
 ### 4.5 File Upload Security
 
@@ -498,8 +517,38 @@ while its own guard refused that same configuration as production.
 - New `atrocore-docker/scripts/preflight-secrets.sh`, profile-aware per §6.1, wired into CI.
 - Only then: Vault, as an agent writing the secret files.
 
-### 6.4 P3.2 — Container hardening and supply chain
-*Gate: `docker compose config` shows limits, non-root and read-only rootfs on every service; CI fails on a HIGH CVE.*
+### 6.4 P3.2 — Container hardening and supply chain — **DONE (2026-09-26)**
+*Gate (as revised): every service declares resource limits, a restart policy and `no-new-privileges`; every service that **can** take a read-only rootfs and a non-root user does, with the reason recorded in-file where it cannot; every external image is digest-pinned; CI fails on a fixable CRITICAL CVE.*
+
+> **The original gate was wrong on two counts and is superseded.** It read "limits, non-root and
+> read-only rootfs on *every* service; CI fails on a HIGH CVE." Both halves proved undeliverable
+> as written, and discovering that is part of what this tier produced:
+>
+> 1. **Read-only and non-root are not universally applicable.** Postgres chowns its data directory
+>    and drops privileges at startup; Node-RED must write `flows.json` into a bind mount, which is
+>    its deployment model; AtroCore installs itself into a bind mount at first run and Apache binds
+>    `:80` as root; the Alfresco JVM services write caches, logs and indexes inside their own
+>    filesystems. Forcing these would break the stack, not harden it. The revised gate asks for the
+>    control wherever it applies and a *stated reason* where it does not — which is auditable,
+>    whereas a blanket rule would simply have been ignored.
+> 2. **"Fails on a HIGH CVE" would have arrived red.** Measured on 2026-09-26: **zero CRITICAL**
+>    across all six repos, but **33 HIGH**, all with fixes available (21 `compliance_web`, 12
+>    `compliance_checklist`). A gate that is red on arrival gets switched off within a day, and a
+>    disabled gate is worse than none because it still reads as protection. So CRITICAL blocks
+>    today and HIGH is reported; the bar rises once the backlog clears. **That backlog is now the
+>    tier's main follow-on item.**
+
+**Delivered.** Every external image digest-pinned across all six repos (a tag is a mutable pointer;
+a tag-only pin does not describe a reproducible build). `compliance_import`'s dependencies pinned
+to 23 exact versions and 448 hashes via `pip-compile --generate-hashes`, generated *inside*
+`python:3.12-slim` because dependency resolution is Python-version-specific and the local venv is
+3.14. Trivy + CycloneDX SBOM in all six pipelines, GitLab and the GitHub mirrors. The Traefik
+unauthenticated dashboard (finding 13 in §11) closed. Container hardening applied per the revised
+gate, each full-hardening case verified by booting the service rather than by rendering config.
+
+**Not done, and deliberately so:** Cosign image signing. Only `compliance_web` publishes images,
+and signing needs a key or keyless OIDC identity that does not exist yet — scaffolding an unusable
+signing step would be worse than recording the gap. It belongs with the registry decision.
 
 - `deploy.resources.limits`, `user:`, `read_only:` + `tmpfs`, `cap_drop: [ALL]` and `restart:` across
   all six compose files plus `compliance_cmis/commons/base.yaml`.
