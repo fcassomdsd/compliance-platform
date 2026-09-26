@@ -170,7 +170,7 @@ every workstream's full writeup.
   per-tier regression gate, and the demo/production split is expressed as compose profiles, never by
   replacing the demo path.
 
-  **Status: P3.0 and P3.1 complete; P3.2–P3.7 not started.** P3.1 (production secrets) landed as
+  **Status: P3.0, P3.1 and P3.2 complete; P3.3–P3.7 not started.** P3.1 (production secrets) landed as
   five merge requests. All three services now resolve secrets by the same precedence
   (`<NAME>_FILE` → `/run/secrets/<name>` → the environment variable), which is the seam a secret
   manager writes into, and each refuses at startup any value published in these repositories —
@@ -182,6 +182,34 @@ every workstream's full writeup.
   gateway keys, short keys, services left in development mode, and insecure session cookies.
   The demo path is unchanged throughout — verified per repo, and `demo-verify-ci.sh` now asserts
   both that the demo profile passes and that the production profile refuses the same workspace.
+
+  **P3.2 (container hardening and supply chain)** landed 2026-09-26: every external image
+  digest-pinned across all six repos, `compliance_import`'s dependencies hash-pinned (23 packages,
+  448 hashes, generated inside `python:3.12-slim` because resolution is Python-version-specific),
+  Trivy scanning and CycloneDX SBOMs in all six pipelines, the unauthenticated Traefik dashboard
+  closed, and container hardening applied wherever each service can take it — with the reason
+  recorded in-file where it cannot, since "absent" and "impossible" are different facts.
+
+  Two things P3.2 found that are now **follow-on items, not closed**:
+
+  - **33 HIGH-severity CVEs**, all with fixes available (21 `compliance_web`, 12
+    `compliance_checklist`). CI reports them but does not block, because a gate that arrives red
+    gets switched off. Clearing this backlog is the precondition for raising the gate from
+    CRITICAL to HIGH.
+  - **Cosign image signing is not done.** Only `compliance_web` publishes images and there is no
+    signing key or keyless OIDC identity yet; scaffolding an unusable signing step would be worse
+    than recording the gap. It belongs with the registry decision.
+
+  **`demo:verify` green against P3.2 (2026-09-26): 30 checks, 0 failures**, from an isolated
+  workspace, with hardening confirmed at runtime (`ReadonlyRootfs=true`, non-root users and
+  `CapDrop=[ALL]` on the services that take them). The run also found and fixed a latent defect in
+  `demo-quickstart.sh` — it sourced `compliance_flow/.env` under `set -a`, letting any
+  compose-configuring variable there hijack every later `docker compose` call for every project —
+  and noted that `share` is the only JVM service still running as `root`.
+
+  Upstream AtroCore also vendors a CRITICAL prototype-pollution advisory in `swiper` inside
+  `web-data/`. That tree is gitignored and installed at container bootstrap, so it is excluded from
+  the source scan — it needs an upstream report and image scanning, not a gate on tracked source.
   **`demo:verify` ran green against all five branches (2026-09-26): 59 checks, 0 failures**, from an
   isolated workspace so the live environment was untouched — full stack boot, AtroCore install,
   both imports, the finding at `Pending Closure Approval`, smoke 15/15, envelope 5/5, all four
