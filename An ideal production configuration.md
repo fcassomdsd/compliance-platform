@@ -546,6 +546,24 @@ to 23 exact versions and 448 hashes via `pip-compile --generate-hashes`, generat
 unauthenticated dashboard (finding 13 in §11) closed. Container hardening applied per the revised
 gate, each full-hardening case verified by booting the service rather than by rendering config.
 
+**`demo:verify` green against these changes (2026-09-26)** — the tier's regression gate per §6.1,
+run from an isolated workspace holding all six branches: the full stack booted with every service
+hardened, and the quickstart reported **30 checks, 0 failures** — AtroCore installed, both
+inspections imported, the finding at `Pending Closure Approval`, smoke 15/15, error-envelope 5/5,
+and all four oversight artifacts filed. Hardening was confirmed *at runtime*, not just in rendered
+config: `compliance_import` and `compliance_web`'s backend both ran with `ReadonlyRootfs=true`,
+non-root users and `CapDrop=[ALL]`, and every service carried `no-new-privileges`.
+
+Two things that run surfaced, neither a P3.2 regression:
+
+- **A latent defect in `demo-quickstart.sh`**, now fixed: it sources `compliance_flow/.env` under
+  `set -a`, which exported *any* compose-configuring variable in that file to every later
+  `docker compose` call, for every project. The symptom is `service "atro-web" is not running`
+  several steps after the cause, while the container is healthy.
+- **`share` is the only JVM service running as `root`** (alfresco, solr, activemq and transform
+  each run as their own user). It is also the component `FOOTPRINT_AUDIT.md` identifies as
+  droppable, so the cheapest fix may be to drop it rather than harden it.
+
 **Not done, and deliberately so:** Cosign image signing. Only `compliance_web` publishes images,
 and signing needs a key or keyless OIDC identity that does not exist yet — scaffolding an unusable
 signing step would be worse than recording the gap. It belongs with the registry decision.

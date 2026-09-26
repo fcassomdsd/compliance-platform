@@ -200,6 +200,13 @@ every workstream's full writeup.
     signing key or keyless OIDC identity yet; scaffolding an unusable signing step would be worse
     than recording the gap. It belongs with the registry decision.
 
+  **`demo:verify` green against P3.2 (2026-09-26): 30 checks, 0 failures**, from an isolated
+  workspace, with hardening confirmed at runtime (`ReadonlyRootfs=true`, non-root users and
+  `CapDrop=[ALL]` on the services that take them). The run also found and fixed a latent defect in
+  `demo-quickstart.sh` — it sourced `compliance_flow/.env` under `set -a`, letting any
+  compose-configuring variable there hijack every later `docker compose` call for every project —
+  and noted that `share` is the only JVM service still running as `root`.
+
   Upstream AtroCore also vendors a CRITICAL prototype-pollution advisory in `swiper` inside
   `web-data/`. That tree is gitignored and installed at container bootstrap, so it is excluded from
   the source scan — it needs an upstream report and image scanning, not a gate on tracked source.
