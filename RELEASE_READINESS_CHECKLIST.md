@@ -170,7 +170,7 @@ every workstream's full writeup.
   per-tier regression gate, and the demo/production split is expressed as compose profiles, never by
   replacing the demo path.
 
-  **Status: P3.0, P3.1 and P3.2 complete; P3.3–P3.7 not started.** P3.1 (production secrets) landed as
+  **Status: P3.0 through P3.3 complete; P3.4–P3.7 not started.** P3.1 (production secrets) landed as
   five merge requests. All three services now resolve secrets by the same precedence
   (`<NAME>_FILE` → `/run/secrets/<name>` → the environment variable), which is the seam a secret
   manager writes into, and each refuses at startup any value published in these repositories —
@@ -206,6 +206,27 @@ every workstream's full writeup.
   `demo-quickstart.sh` — it sourced `compliance_flow/.env` under `set -a`, letting any
   compose-configuring variable there hijack every later `docker compose` call for every project —
   and noted that `share` is the only JVM service still running as `root`.
+
+  **P3.3 (TLS and the network edge)** landed 2026-09-26: a TLS edge serving HTTP/2 over TLSv1.3
+  with HSTS and CSP; nginx fully hardened (non-root, read-only rootfs), which closes P3.2's one
+  deferral; `BIND_IP` across all five compose files so production can bind every internal port to
+  the loopback interface and leave the edge on 443 as the only externally published port; and the
+  field app's traffic routed through that edge. `demo:verify` green — 30 checks, 0 failures.
+
+  Two things it resolved that were on the open list:
+
+  - **The host-port-8080 collision.** `compliance_cmis`'s Traefik and `compliance_web`'s prod
+    profile both bound it, so the prod profile could never start beside the Alfresco stack.
+    Traefik keeps 8080; `compliance_web` moved.
+  - **The reviewer group's folder grant** (lean-demo item #3) is now genuinely group-level:
+    `SiteConsumer` for the group plus folder `Contributor`, replacing site-wide `SiteCollaborator`
+    on each user. The note saying this could not be scripted was right about the paths it tried
+    and wrong about the conclusion — the legacy webscript accepts a group as JSON with
+    `group.fullName`; it is form-encoded `groupId` that fails.
+
+  Worth recording for whoever plans the real deployment: **the field app currently sends the
+  shared API key and the inspector's Alfresco password over plain HTTP** to `:1880`, `:8000` and
+  `:8080`. The new edge routes put that inside TLS, but only once the app is pointed at the edge.
 
   Upstream AtroCore also vendors a CRITICAL prototype-pollution advisory in `swiper` inside
   `web-data/`. That tree is gitignored and installed at container bootstrap, so it is excluded from
