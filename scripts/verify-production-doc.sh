@@ -123,21 +123,39 @@ check_port_documented 5432 "PostgreSQL (Alfresco)"
 check_port_documented 1880 "Node-RED"
 check_port_documented 8000 "compliance_import"
 
-banner "The host-port-8080 conflict must stay flagged while it exists"
-CMIS_8080=$(grep -c '"8080:8080"' compliance_cmis/commons/base.yaml || true)
-WEB_8080=$(grep -c '"8080:80"' compliance_web/docker-compose.yml || true)
-if [ "$CMIS_8080" -gt 0 ] && [ "$WEB_8080" -gt 0 ]; then
-  grep -q 'Blocking conflict on host port 8080' "$DOC"
-  ok "conflict still exists in compose, and the document still flags it" $?
-else
-  green "  ok    host port 8080 conflict appears resolved in compose"
-  CHECKS=$((CHECKS + 1))
-  if grep -q 'Blocking conflict on host port 8080' "$DOC"; then
-    red "  FAIL  conflict is resolved but the document still describes it as live"
-    FAILED=$((FAILED + 1))
-    CHECKS=$((CHECKS + 1))
-  fi
-fi
+banner "The host-port-8080 collision stays resolved (P3.3)"
+# This check ran in the opposite direction before P3.3: it asserted the
+# collision existed and that the document flagged it. Now it asserts the
+# collision is gone, so reintroducing it fails here rather than on a
+# deployment day when the prod profile refuses to start beside Alfresco.
+CMIS_8080=$(grep -c '"${BIND_IP:-0.0.0.0}:8080:8080"' compliance_cmis/commons/base.yaml || true)
+[ "${CMIS_8080:-0}" -ge 1 ]
+ok "compliance_cmis's Traefik still owns host 8080 (the demo depends on it)" $?
+
+! grep -qE '^\s*- "(\$\{BIND_IP[^"]*\}:)?8080:80"' compliance_web/docker-compose.yml
+ok "compliance_web no longer publishes host 8080" $?
+
+grep -q 'Host port 8080 — resolved in P3.3' "$DOC"
+ok "the document records the collision as resolved, not live" $?
+
+banner "TLS edge and per-interface binding (P3.3)"
+grep -q 'frontend-tls:' compliance_web/docker-compose.yml
+ok "a TLS edge service exists" $?
+
+grep -q 'listen 8443 ssl' compliance_web/docker/nginx/tls.conf
+ok "the TLS server listens on an unprivileged port (so nginx runs non-root)" $?
+
+# HSTS must appear in the TLS server and NOT in the plain-HTTP one: sending it
+# over HTTP is meaningless, and a demo stack sending it would pin a
+# developer's browser to HTTPS for a host that does not serve it.
+grep -q 'Strict-Transport-Security' compliance_web/docker/nginx/tls.conf
+ok "HSTS is set on the TLS server" $?
+! grep -q 'Strict-Transport-Security' compliance_web/docker/nginx/default.conf
+ok "HSTS is NOT set on the plain-HTTP server" $?
+
+BINDCOUNT=$(grep -l 'BIND_IP' */docker-compose*.y*ml compliance_cmis/commons/base.yaml 2>/dev/null | wc -l)
+[ "$BINDCOUNT" -ge 5 ]
+ok "BIND_IP governs published ports in $BINDCOUNT compose files" $?
 
 banner "Hardening claims match the tree"
 # P3.2 landed, so the document now claims hardening EXISTS. This check runs in

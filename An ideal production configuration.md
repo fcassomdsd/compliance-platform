@@ -4,11 +4,12 @@
 **Audience**: Technical stakeholders, operations team, project sponsors
 **Last substantive revision**: 2026-09-26 (re-planned against the current tree; supersedes the 2026-07-30 1.0-draft)
 
-**Status**: **Partially implemented — P3.0, P3.1 and P3.2 are done; P3.3–P3.7 are not started.**
+**Status**: **Partially implemented — P3.0 through P3.3 are done; P3.4–P3.7 are not started.**
 Landed so far: secrets resolve from files with production refusing published values, a profile-aware
 credential preflight, digest-pinned images everywhere, hash-pinned Python dependencies, Trivy
-scanning and SBOM generation in all six pipelines, and container hardening. **Still absent**: Vault,
-Keycloak, PostgreSQL replication, Prometheus/Grafana/Loki, ClamAV, TLS, backup automation and image
+scanning and SBOM generation in all six pipelines, container hardening, and a TLS edge with
+per-interface port binding. **Still absent**: Vault,
+Keycloak, PostgreSQL replication, Prometheus/Grafana/Loki, ClamAV, backup automation and image
 signing. The running systems are single-host Docker Compose setups per repo plus the
 `atrocore-docker` demo stack described in the root `CLAUDE.md`. This document is the **P3** milestone
 plan; each tier in §6 records its own status. If you are adapting this platform for a different civil aviation authority before thinking
@@ -174,13 +175,13 @@ or bound to localhost in the production profile (§6.5):
 `compliance_checklist` is an external consumer of both. AtroCore's port 80 is the most easily
 overlooked of these: it is a full admin UI with no reverse proxy in front of it.
 
-> **Blocking conflict on host port 8080.** `compliance_cmis`'s Traefik binds `8080:8080`, and
-> `compliance_web`'s **`prod` profile** binds `8080:80`. On one host they cannot both start — the
-> second fails with "port is already allocated". This has never surfaced because the demo and every
-> documented bring-up run `compliance_web` in its **`dev`** profile on `3000`, so the production
-> profile has never been started next to the Alfresco stack. Resolving this is a **precondition** of
-> the single-host target, not a detail of it: the TLS edge takes `443`, Traefik moves to a
-> localhost-bound port, and nothing else publishes `8080` at all. Tracked in §6.5.
+> **Host port 8080 — resolved in P3.3 (2026-09-26).** `compliance_cmis`'s Traefik and
+> `compliance_web`'s `prod` profile both bound host `8080`, so the production profile could never
+> start beside the Alfresco stack. It went unnoticed because every documented bring-up uses the
+> `dev` profile on `3000`, so nothing had ever run both at once. Traefik keeps `8080` — the demo,
+> the runbook and every smoke probe are wired to `:8080/alfresco` — and `compliance_web` moved to
+> `${WEB_HTTP_PORT:-8081}` for plain HTTP and `443` for TLS. Verified by holding host `8080` with
+> a third service while both `compliance_web` edges served simultaneously.
 
 ---
 
@@ -579,8 +580,51 @@ signing step would be worse than recording the gap. It belongs with the registry
 - Fold in the reviewer-group grant: `seed-demo-identities.sh` still grants each demo user
   membership directly, which is broader than the intended `SiteConsumer` + `Contributor` shape.
 
-### 6.5 P3.3 — TLS and the network edge
+### 6.5 P3.3 — TLS and the network edge — **DONE (2026-09-26)**
 *Gate: every externally reachable port is TLS-only; nothing else is published to the host.*
+
+**Delivered.** The gate is met by configuration rather than by default, which is the only way it
+could be met without breaking the demo: `BIND_IP` (all five compose files) decides which host
+interface every published port listens on, defaulting to `0.0.0.0` so the demo and CI are
+untouched, and a production deployment sets `127.0.0.1` — leaving `compliance_web`'s TLS edge on
+443 as the single externally published port.
+
+- **TLS edge**: a new `tls` profile serving HTTP/2 over TLSv1.3 with HSTS, CSP,
+  `X-Content-Type-Options`, `X-Frame-Options: DENY` and `Referrer-Policy`. HSTS is set **only** on
+  the TLS server — over plain HTTP it is meaningless, and a demo stack sending it would pin a
+  developer's browser to HTTPS for a host that does not serve it.
+- **nginx fully hardened**, closing what P3.2 deferred. Moving it to port 8080 *inside* the
+  container is what made it possible: above 1024 it needs no `NET_BIND_SERVICE`, so it runs as the
+  unprivileged `nginx` user with a read-only rootfs. Host 443 maps to the container's 8443.
+- **The field app's traffic goes through the edge** (`/gateway/`, `/upload/`, `/alfresco/`), which
+  is what allows `:1880`, `:8000` and `:8080` to be loopback-bound. Worth stating plainly: today
+  `compliance_checklist` sends the shared API key and the inspector's Alfresco password over
+  **plain HTTP** to those ports. These routes put that inside TLS. They are deliberately plain
+  reverse proxies — the authentication that applies is the gateway's own API key and Alfresco's own
+  login, unchanged; adding a second authorisation layer at the edge would silently diverge from
+  what the services enforce.
+- **`trust proxy` re-verified** against the new edge: the backend receives `X-Forwarded-Proto:
+  https` and the real client IP, so `req.secure` and the rate limiter's `req.ip` are correct. One
+  hop, so the existing setting of `1` is still right.
+- **The reviewer-group grant** (a long-standing open item) is closed — see below.
+
+**`demo:verify` green: 30 checks, 0 failures.** One caveat: the first attempt failed at the
+AtroCore bootstrap with a `repo.packagist.org` timeout — environmental, not a regression (the same
+step passed in the P3.1 run with zero timeouts, and connectivity was confirmed recovered before the
+re-run). The quickstart has therefore completed cleanly on this tier; the full `demo-verify-ci.sh`
+wrapper has not done so start-to-finish in a single pass.
+
+**A documented limitation that turned out to be wrong.** `seed-demo-identities.sh` said a
+group-level repository grant could not be scripted in this deployment. It was right about the three
+API paths it had tried and wrong about the conclusion: two genuinely fail, but the legacy
+`sites/{site}/memberships` webscript accepts a group as **JSON** with a nested `group.fullName` —
+it is form-encoded `groupId` that fails. The demo now grants `SiteConsumer` to the *group* plus
+folder-level `Contributor`, replacing site-wide `SiteCollaborator` on each user. Strictly narrower,
+and verified live.
+
+**Still open in this area, deliberately:** the Docker socket is still mounted into
+`compliance_cmis`'s Traefik. Removing it means replacing Docker service discovery with static
+configuration, which is a change to how that stack routes rather than to its edge.
 
 - **Resolve the host-port-8080 conflict first** (see §2.3). `compliance_cmis`'s Traefik and
   `compliance_web`'s `prod` profile both claim it, so the production profile cannot currently start
