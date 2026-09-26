@@ -62,6 +62,13 @@ this is almost always `docs:`, occasionally `fix:` (correcting something wrong) 
 - **Scope** — which documents are affected.
 - Cross-check any file paths, links, or claims about component-repo behavior you're adding
   or changing — this repository has no CI today to catch drift automatically.
+- **If you touched `An ideal production configuration.md`, run
+  `./scripts/verify-production-doc.sh` from the workspace root** (with the six component repos
+  checked out beside this one). It asserts the document's image references, memory limits, shared
+  networks and published ports against the tracked compose files. That document drifted for two
+  months into specifying a wrong Alfresco image and a pre-built AtroCore image whose licensing
+  problem had been deliberately engineered away; the script exists so that cannot recur silently.
+  It needs no Docker daemon and no `.env` files.
 
 ---
 
