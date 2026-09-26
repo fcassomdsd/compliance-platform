@@ -466,8 +466,18 @@ passing `preflight-secrets.sh --production`, from the same tree.
 - Update `RELEASE_READINESS_CHECKLIST.md`, `CLAUDE.md` and `internal/TECHNICAL_DEBT_ANALYSIS.md` §5
   to reference these tiers instead of "the existing roadmap."
 
-### 6.3 P3.1 — Secrets that are actually secret
+### 6.3 P3.1 — Secrets that are actually secret — **DONE (2026-09-26)**
 *Gate: a fresh production deployment starts with zero credentials that exist in any public repository.*
+
+**Delivered**, as five merge requests. `compliance_flow/data/secrets.js`,
+`compliance_web/server/config/secrets.cjs` and `compliance_import/secret_config.py` implement the
+same precedence and each refuses published values at startup;
+`compliance_cmis/docker-compose.yml` no longer carries weak fallbacks;
+`compliance_checklist` flags the placeholder when it is typed in; and
+`atrocore-docker/scripts/preflight-secrets.sh` is the gate, with a 19-check self-test in CI.
+Vault itself is deliberately **not** deployed — the file-based seam is in place, which is what
+makes adding it a no-op for application code. Remaining for a real deployment: generate and
+distribute the actual values, and remove the demo identities.
 
 - Generate and distribute a real gateway key across `compliance_flow`, `compliance_web`,
   `compliance_import` and `compliance_checklist`'s stored copy.

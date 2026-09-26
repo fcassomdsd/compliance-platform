@@ -168,7 +168,20 @@ every workstream's full writeup.
   publish target, no auto-update) and supply-chain scanning (no repository has any security-scanning
   job today). **Hard invariant: the lean demo must survive every tier** — `demo:verify` is the
   per-tier regression gate, and the demo/production split is expressed as compose profiles, never by
-  replacing the demo path. Status: **P3.0 (correct the plan) in progress; P3.1–P3.7 not started.**
+  replacing the demo path.
+
+  **Status: P3.0 and P3.1 complete; P3.2–P3.7 not started.** P3.1 (production secrets) landed as
+  five merge requests. All three services now resolve secrets by the same precedence
+  (`<NAME>_FILE` → `/run/secrets/<name>` → the environment variable), which is the seam a secret
+  manager writes into, and each refuses at startup any value published in these repositories —
+  presence was previously mistaken for secrecy, and the shipped gateway key is known to everyone
+  who has cloned any component repo. `compliance_cmis` no longer falls back to `alfresco`/`secret`
+  when a `.env` is missing; it stops and says which variable is unset.
+  `atrocore-docker/scripts/preflight-secrets.sh` is the gate: `--profile demo` reports the
+  published values and exits 0, `--profile production` refuses them and also catches mismatched
+  gateway keys, short keys, services left in development mode, and insecure session cookies.
+  The demo path is unchanged throughout — verified per repo, and `demo-verify-ci.sh` now asserts
+  both that the demo profile passes and that the production profile refuses the same workspace.
 
 ## What's actually blocking a public release today
 
