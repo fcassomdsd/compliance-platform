@@ -479,6 +479,15 @@ Vault itself is deliberately **not** deployed — the file-based seam is in plac
 makes adding it a no-op for application code. Remaining for a real deployment: generate and
 distribute the actual values, and remove the demo identities.
 
+**`demo:verify` green against these changes (2026-09-26)** — the tier's regression gate per §6.1,
+run from an isolated workspace holding all five feature branches: 59 checks, 0 failures. The full
+stack booted, AtroCore installed, both inspections imported, the finding reached
+`Pending Closure Approval`, smoke 15/15, error-envelope audit 5/5, and all four oversight artifacts
+were filed. Three things were confirmed live inside the running containers rather than only in
+unit tests: `compliance_import` resolved `ALFRESCO_PASSWORD` **from its mounted Docker secret**;
+the gateway answered `401` without an API key; and `compliance_web` ran normally in development
+while its own guard refused that same configuration as production.
+
 - Generate and distribute a real gateway key across `compliance_flow`, `compliance_web`,
   `compliance_import` and `compliance_checklist`'s stored copy.
 - Remove `compliance_cmis`'s `DB_PASSWORD:-alfresco` and `SOLR_SECRET:-secret` fallbacks; fail loudly
@@ -537,7 +546,12 @@ distribute the actual values, and remove the demo identities.
   **`atrocore-docker`**. Then retire the quickstart's `/specialties` stand-in.
 - Add compose `healthcheck:` blocks to `compliance_flow`, `compliance_import`, `atrocore-docker` and
   `compliance_web`'s `backend` — today only `compliance_cmis` (5) and `compliance_web`'s
-  `db`/`frontend-*` (3) have any.
+  `db`/`frontend-*` (3) declare any. One nuance found while running `demo:verify` on 2026-09-26:
+  `node-red` nevertheless reports healthy, because the upstream `nodered/node-red` **image** ships
+  its own `HEALTHCHECK` (`node /healthcheck.js`). So Docker has a liveness signal for it even
+  though this platform declares none — but it is the image's generic check, not one that knows
+  anything about the gateway's own routes. `compliance_import`, `atro-web` and `compliance_web`'s
+  `backend` have **no healthcheck at all**, from either source.
 - Prometheus + Grafana + Loki; scrape container metrics and the health endpoints.
 - Alert on the **measured** failure modes in §5.5, especially the ActiveMQ hang and the Solr
   gateway hang — not just process liveness.

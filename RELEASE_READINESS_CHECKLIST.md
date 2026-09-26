@@ -182,6 +182,10 @@ every workstream's full writeup.
   gateway keys, short keys, services left in development mode, and insecure session cookies.
   The demo path is unchanged throughout — verified per repo, and `demo-verify-ci.sh` now asserts
   both that the demo profile passes and that the production profile refuses the same workspace.
+  **`demo:verify` ran green against all five branches (2026-09-26): 59 checks, 0 failures**, from an
+  isolated workspace so the live environment was untouched — full stack boot, AtroCore install,
+  both imports, the finding at `Pending Closure Approval`, smoke 15/15, envelope 5/5, all four
+  oversight artifacts filed.
 
 ## What's actually blocking a public release today
 
