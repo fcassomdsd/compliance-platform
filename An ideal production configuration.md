@@ -390,28 +390,45 @@ already terminates the SPA and proxies both `/api/` and `/nodered/`. It currentl
 | RPO | 15 minutes (WAL archiving) |
 | RTO | 4 hours (core workflows, single host, restore from backup) |
 
-> **These are targets, not measurements.** They remain unevidenced until the `restore:verify` job in
-> §6.5 is green. The 1.0 draft's 2-hour RTO assumed a warm standby to promote; on a single host with
+> **Evidenced as of 2026-09-26 for the restore half.** The `restore:verify` drill has run: three
+> schemas dropped to zero tables and the Alfresco content store wiped to zero files, both asserted,
+> then restored from a checksum-verified set with every recorded metric matching — 155/70/9 tables,
+> 299 content files, the demo row — and the gateway smoke matrix at 15/15 afterwards. What that
+> establishes is that a backup **restores a working system**. It does not yet establish the
+> *numbers*: RPO depends on WAL archiving, which is not deployed, and RTO has not been timed on
+> production-sized data. Treat 15 minutes and 4 hours as targets still. The 1.0 draft's 2-hour RTO assumed a warm standby to promote; on a single host with
 > restore-from-backup, 4 hours is the honest number until a drill proves otherwise. Do not quote
 > either figure to a stakeholder as a commitment before the drill has run.
 
-### 5.3 Backup Coverage — current state
+### 5.3 Backup Coverage
 
-**One of four datasets is covered today.** `atrocore-docker/scripts/backup-db.sh` and
-`restore-db.sh` are real and working, but scoped to the AtroCore database only, and invoked
-manually or as a CI non-emptiness assertion — there is no schedule.
+**All four datasets are covered as of P3.4.** Before it, exactly one was: `backup-db.sh` dumped the
+AtroCore database and nothing touched the other three. A database backup without its matching
+content store does not restore a working system.
 
-| Dataset | Covered today | Frequency | Retention | Method |
-|---|---|---|---|---|
-| PostgreSQL (AtroCore) | **Yes**, manual | Daily full + WAL | 30 days | `pg_dump` + WAL archiving |
-| PostgreSQL (Alfresco) | **No** | Daily full + WAL | 30 days | `pg_dump` + WAL archiving |
-| PostgreSQL (compliance) | **No** | Daily full + WAL | 30 days | `pg_dump` + WAL archiving |
-| Alfresco content store | **No** | Daily incremental, weekly full | 30 days | `rsync` to a separate volume |
-| Vault data | n/a (not deployed) | Daily | 90 days | Vault snapshot |
-| Compose configs + `.env` structure | Git | Continuous | Permanent | Git |
+| Dataset | Covered | How |
+|---|---|---|
+| PostgreSQL (AtroCore) | Yes | `pg_dump -Fc` via `backup-platform.sh` |
+| PostgreSQL (Alfresco) | Yes | `pg_dump -Fc` via `backup-platform.sh` |
+| PostgreSQL (compliance) | Yes | `pg_dump -Fc` via `backup-platform.sh` |
+| Alfresco content store | Yes | `tar czf` from inside a container (the store is owned by Alfresco's uid) |
+| Solr indexes | **No, deliberately** | Derived state, rebuilt by reindexing. Storing a stale copy of something reconstructible is worse than storing nothing. |
+| AtroCore `web-data/` | **No, deliberately** | Reinstalled at container bootstrap. |
+| `.env` / secrets | **No, deliberately** | They belong in a secret manager, not in a set that gets copied around (P3.1). |
+| WAL archiving | **Not yet** | Required for the 15-minute RPO. Not deployed; the RPO target is unevidenced until it is. |
 
-A database backup without the matching content store is not a restorable system: Alfresco's metadata
-and its binaries must be restored from the same point in time.
+**Ordering is a correctness property, not a preference.** Databases are dumped first and the content
+store second. Alfresco's database references content-store files, so capturing content first would
+let a document created between the two steps be referenced by the later dump and be absent from the
+backup — a dangling reference, which surfaces as a broken document. In this order the worst case is
+a content file with no database row: an orphan, harmless. Restore mirrors it exactly. This makes an
+online backup degrade safely; it does not make it atomic. For a consistent point-in-time set, stop
+Alfresco first.
+
+Retention is 30 days by default, pruned by the same script. **Backups must land on a volume separate
+from the data they protect** — a backup on the same disk protects against exactly one failure mode,
+and not the one that usually happens. `deploy/systemd/compliance-backup.{service,timer}` schedules
+it nightly, tracked in the repository so the schedule is reviewable and survives a rebuild.
 
 ### 5.4 Disaster Recovery Runbook (outline)
 
@@ -638,8 +655,28 @@ configuration, which is a change to how that stack routes rather than to its edg
   edge, because `compliance_checklist` needs them.
 - Set `trust proxy` correctly for the new edge and re-verify secure-cookie behaviour end to end.
 
-### 6.6 P3.4 — Backup, restore, and a drill that actually ran
+### 6.6 P3.4 — Backup, restore, and a drill that actually ran — **MOSTLY DONE (2026-09-26)**
 *Gate: a scripted restore into a blank host reproduces a working system, proven in CI.*
+
+**The drill has run and passed.** `restore-verify-ci.sh` populates a stack, records its state, backs
+it up, **destroys it** — three schemas to zero tables, content store to zero files, both asserted —
+restores from a checksum-verified set, and compares. Every metric matched (155/70/9 tables, 299
+content files, the demo inspection row) and the gateway smoke matrix passed 15/15 afterwards.
+
+It found two bugs in itself on the first real run, which is the argument for drills over documents:
+the destroy **silently failed** (`must be owner of schema public`, with stderr suppressed — the
+zero-tables assertion is the only reason it was caught, and without it a "successful" restore would
+have been measured against data that was never removed); and the verification **misattributed its
+own failure**, reporting a blanket 401 as expected Solr-reindex lag and exiting 0. A plausible wrong
+explanation is worse than a plain failure.
+
+**Still open in this tier:**
+
+- **WAL archiving**, which the 15-minute RPO depends on. Without it the RPO is bounded by the backup
+  interval — nightly — so the current honest figure is 24 hours, not 15 minutes.
+- **RTO has not been timed** on production-sized data. The drill runs against the demo dataset.
+- `restore:verify` is wired as manual/scheduled, like `demo:verify`, because it boots the whole
+  stack. Nothing schedules it yet.
 
 - Extend `backup-db.sh`/`restore-db.sh` to all three databases **and** the Alfresco content store.
 - WAL archiving; a retention policy; a systemd timer that is itself a tracked artifact.

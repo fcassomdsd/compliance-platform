@@ -170,7 +170,7 @@ every workstream's full writeup.
   per-tier regression gate, and the demo/production split is expressed as compose profiles, never by
   replacing the demo path.
 
-  **Status: P3.0 through P3.3 complete; P3.4–P3.7 not started.** P3.1 (production secrets) landed as
+  **Status: P3.0 through P3.3 complete; P3.4 mostly complete; P3.5–P3.7 not started.** P3.1 (production secrets) landed as
   five merge requests. All three services now resolve secrets by the same precedence
   (`<NAME>_FILE` → `/run/secrets/<name>` → the environment variable), which is the seam a secret
   manager writes into, and each refuses at startup any value published in these repositories —
@@ -223,6 +223,20 @@ every workstream's full writeup.
     on each user. The note saying this could not be scripted was right about the paths it tried
     and wrong about the conclusion — the legacy webscript accepts a group as JSON with
     `group.fullName`; it is form-encoded `groupId` that fails.
+
+  **P3.4 (backup, restore, and a drill that actually ran)** landed 2026-09-26. All four datasets
+  are now backed up — three databases plus the Alfresco content store — where previously exactly
+  one was. More importantly the **drill has run**: the stack was populated, backed up, then
+  destroyed (three schemas to zero tables, content store to zero files, both asserted) and
+  restored, with every metric matching and the gateway smoke matrix at 15/15 afterwards.
+
+  The drill found two bugs in itself on its first run, which is the case for drills over documents:
+  the destroy step silently failed on a permissions error with stderr suppressed, and the
+  verification reported a blanket 401 as expected Solr lag while exiting 0. Both fixed.
+
+  **Not finished, and it changes a number that matters:** WAL archiving is not deployed, so the RPO
+  is bounded by the backup interval. The honest figure today is **24 hours, not the 15 minutes** the
+  production plan targets. RTO has also not been timed against production-sized data.
 
   Worth recording for whoever plans the real deployment: **the field app currently sends the
   shared API key and the inspector's Alfresco password over plain HTTP** to `:1880`, `:8000` and
