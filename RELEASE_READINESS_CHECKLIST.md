@@ -234,9 +234,19 @@ every workstream's full writeup.
   the destroy step silently failed on a permissions error with stderr suppressed, and the
   verification reported a blanket 401 as expected Solr lag while exiting 0. Both fixed.
 
-  **Not finished, and it changes a number that matters:** WAL archiving is not deployed, so the RPO
-  is bounded by the backup interval. The honest figure today is **24 hours, not the 15 minutes** the
-  production plan targets. RTO has also not been timed against production-sized data.
+  **WAL archiving is now configured** on all three databases (`archive_timeout=300`, so the
+  exposure window is five minutes rather than the nightly interval), with physical base backups
+  alongside the logical dumps — a `pg_dump` cannot be replayed with WAL, so PITR needs both.
+  Point-in-time recovery was proven end to end on a throwaway instance: recovery to a chosen
+  timestamp kept the rows committed before it and discarded those after.
+
+  **Still not finished:** a PITR drill against this platform's own stack (the mechanism is proven,
+  the runbook is not), an RTO measurement on production-sized data, and offsite shipping plus
+  pruning of the archive. **And it introduces a new failure mode**: with `archive_mode=on`, a
+  failing `archive_command` makes PostgreSQL retain every WAL segment until archiving succeeds,
+  filling the volume until the database stops. Silent until sudden.
+  `pg_stat_archiver.failed_count` has to be on the alert list — it is named in P3.5 for that
+  reason.
 
   Worth recording for whoever plans the real deployment: **the field app currently sends the
   shared API key and the inspector's Alfresco password over plain HTTP** to `:1880`, `:8000` and

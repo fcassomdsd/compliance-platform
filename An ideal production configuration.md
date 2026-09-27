@@ -390,13 +390,24 @@ already terminates the SPA and proxies both `/api/` and `/nodered/`. It currentl
 | RPO | 15 minutes (WAL archiving) |
 | RTO | 4 hours (core workflows, single host, restore from backup) |
 
-> **Evidenced as of 2026-09-26 for the restore half.** The `restore:verify` drill has run: three
-> schemas dropped to zero tables and the Alfresco content store wiped to zero files, both asserted,
-> then restored from a checksum-verified set with every recorded metric matching — 155/70/9 tables,
-> 299 content files, the demo row — and the gateway smoke matrix at 15/15 afterwards. What that
-> establishes is that a backup **restores a working system**. It does not yet establish the
-> *numbers*: RPO depends on WAL archiving, which is not deployed, and RTO has not been timed on
-> production-sized data. Treat 15 minutes and 4 hours as targets still. The 1.0 draft's 2-hour RTO assumed a warm standby to promote; on a single host with
+> **RPO is now mechanically achievable; RTO is still a target.**
+>
+> **RPO.** WAL archiving is configured on all three databases with
+> `archive_timeout=300`, which forces a segment switch every five minutes even on an idle
+> database — so the exposure window is five minutes, not the nightly backup interval. Point-in-time
+> recovery was proven end to end on a throwaway instance: a base backup, then rows committed before
+> and after a chosen timestamp, then recovery to that timestamp. PostgreSQL logged
+> `recovery stopping before commit of transaction 734` and `archive recovery complete`, and the
+> recovered database held the "before" rows and **not** the "after" ones. The 15-minute figure is
+> therefore conservative rather than aspirational. What has *not* been done is a PITR drill against
+> this platform's own stack — the mechanism is proven, the runbook for it is not.
+>
+> **RTO.** Still a target. The `restore:verify` drill has run — three schemas dropped to zero
+> tables and the content store wiped to zero files, both asserted, then restored from a
+> checksum-verified set with every metric matching (155/70/9 tables, 299 content files, the demo
+> row) and the gateway smoke matrix at 15/15 afterwards. That establishes a backup **restores a
+> working system**. It does not time one: the drill runs against the demo dataset, not
+> production-sized data. The 1.0 draft's 2-hour RTO assumed a warm standby to promote; on a single host with
 > restore-from-backup, 4 hours is the honest number until a drill proves otherwise. Do not quote
 > either figure to a stakeholder as a commitment before the drill has run.
 
@@ -415,7 +426,8 @@ content store does not restore a working system.
 | Solr indexes | **No, deliberately** | Derived state, rebuilt by reindexing. Storing a stale copy of something reconstructible is worse than storing nothing. |
 | AtroCore `web-data/` | **No, deliberately** | Reinstalled at container bootstrap. |
 | `.env` / secrets | **No, deliberately** | They belong in a secret manager, not in a set that gets copied around (P3.1). |
-| WAL archiving | **Not yet** | Required for the 15-minute RPO. Not deployed; the RPO target is unevidenced until it is. |
+| WAL archiving | Yes | `archive_mode=on`, `archive_timeout=300` on all three databases, archiving to a bind-mounted directory |
+| Physical base backups | Yes | `pg_basebackup -Ft -Xf` per database, which is what WAL replays onto — a `pg_dump` cannot be combined with WAL |
 
 **Ordering is a correctness property, not a preference.** Databases are dumped first and the content
 store second. Alfresco's database references content-store files, so capturing content first would
@@ -670,13 +682,29 @@ have been measured against data that was never removed); and the verification **
 own failure**, reporting a blanket 401 as expected Solr-reindex lag and exiting 0. A plausible wrong
 explanation is worse than a plain failure.
 
+**WAL archiving is configured and point-in-time recovery is proven** (see §5.2). Two details that
+are easy to get wrong and are recorded in the scripts rather than left to be rediscovered:
+
+- A `pg_dump` **cannot** be replayed with WAL. PITR needs a physical base backup, so
+  `backup-platform.sh` takes both: logical dumps as the restore path, `pg_basebackup` as the RPO
+  path. They are ~160 MB against ~376 KB respectively; that difference is the price of PITR.
+- `pg_basebackup -Xs` cannot write a tar to stdout. `-Xf` is used instead, which is safe precisely
+  because archiving is on — any WAL it needs is also in the archive.
+
 **Still open in this tier:**
 
-- **WAL archiving**, which the 15-minute RPO depends on. Without it the RPO is bounded by the backup
-  interval — nightly — so the current honest figure is 24 hours, not 15 minutes.
-- **RTO has not been timed** on production-sized data. The drill runs against the demo dataset.
-- `restore:verify` is wired as manual/scheduled, like `demo:verify`, because it boots the whole
-  stack. Nothing schedules it yet.
+- **A PITR drill against this platform's own stack.** The mechanism is proven on a throwaway
+  instance; the platform-specific runbook is not written or exercised.
+- **RTO has not been timed** on production-sized data.
+- **The archive is not shipped offsite** and is not pruned. A full archive volume stops the
+  database — see the hazard note below.
+- `restore:verify` is wired as manual/scheduled, like `demo:verify`. Nothing schedules it yet.
+
+> **The hazard this configuration introduces.** With `archive_mode=on`, a failing `archive_command`
+> does not cause PostgreSQL to discard WAL — it retains every segment until archiving succeeds, and
+> the data volume fills until the database stops. This is a new way for the platform to go down and
+> it is silent until it is sudden. `pg_stat_archiver.failed_count` must be on the alert list, which
+> is why it is named in §6.7's observability tier.
 
 - Extend `backup-db.sh`/`restore-db.sh` to all three databases **and** the Alfresco content store.
 - WAL archiving; a retention policy; a systemd timer that is itself a tracked artifact.
