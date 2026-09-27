@@ -95,9 +95,10 @@ every workstream's full writeup.
   hard-coded developer path, and `compliance_web`'s unbounded `auth_session` growth (new
   cleanup job) and its four duplicated AFTS-escape copies. The remaining items ship as
   documented known limitations, not blockers — most consequentially, **P3
-  production-hardening is at 0%** (no Vault, Keycloak, observability, or replication), which
-  is stated prominently in both the adopter doc and the production-configuration doc's own
-  banner. Detail: `internal/TECHNICAL_DEBT_ANALYSIS.md`.
+  production-hardening was at 0%** (no Vault, Keycloak, observability, or replication) when
+  this was written; tiers P3.0–P3.5 have since landed, leaving Vault, Keycloak and replication
+  open. Both the adopter doc and the production-configuration doc's own banner carry the
+  current status. Detail: `internal/TECHNICAL_DEBT_ANALYSIS.md`.
 - [x] **(W7) Adopter onboarding is installable, not hand-entered.** A fresh deployment used to
   present 32 entities with no menu entry pointing at most of them (AtroCore loads layout
   *content* from its `layout` table or its own module resources — never from the
@@ -170,7 +171,7 @@ every workstream's full writeup.
   per-tier regression gate, and the demo/production split is expressed as compose profiles, never by
   replacing the demo path.
 
-  **Status: P3.0 through P3.3 complete; P3.4 mostly complete; P3.5–P3.7 not started.** P3.1 (production secrets) landed as
+  **Status: P3.0 through P3.3 and P3.5 complete; P3.4 mostly complete; P3.6–P3.7 not started.** P3.1 (production secrets) landed as
   five merge requests. All three services now resolve secrets by the same precedence
   (`<NAME>_FILE` → `/run/secrets/<name>` → the environment variable), which is the seam a secret
   manager writes into, and each refuses at startup any value published in these repositories —
@@ -245,8 +246,48 @@ every workstream's full writeup.
   pruning of the archive. **And it introduces a new failure mode**: with `archive_mode=on`, a
   failing `archive_command` makes PostgreSQL retain every WAL segment until archiving succeeds,
   filling the volume until the database stops. Silent until sudden.
-  `pg_stat_archiver.failed_count` has to be on the alert list — it is named in P3.5 for that
-  reason.
+  That is now alerted on, though not in the shape this paragraph originally called for: see
+  P3.5 below for why a `failed_count > 0` rule is the wrong test.
+
+  **P3.5 (observability and health)** landed 2026-09-27, and the measurement that justifies it is
+  worth stating plainly. With ActiveMQ stopped, Alfresco's own readiness probe answered `200` and
+  **all seven** service health probes reported green — while the measured behaviour of that state
+  is an operation hanging forever with no error and nothing in any log. The TCP probe of
+  `activemq:61616` fired an alert 2m16s later. Nothing else on this platform notices, and that gap
+  is the whole reason the tier exists.
+
+  What shipped: `/health` on `compliance_flow` and `atrocore-docker` (the two that lacked one),
+  compose healthchecks on the four services with none, a Prometheus/Alertmanager/Grafana/Loki
+  stack under `atrocore-docker/observability/` as a **separate opt-in Compose project** so the
+  lean demo is untouched, 15 alert rules, one 17-panel dashboard, the six auth metrics
+  `AUTH_CHUNK8_OPERATIONAL_READINESS.md` §6 has named since the auth subsystem shipped, and
+  structured JSON logging in the two services that emitted free text.
+
+  The gate's third clause — "killing any container fires an alert" — is a tracked artifact rather
+  than a claim: `verify-observability.sh` stops a container, waits for the alert to fire, confirms
+  Alertmanager received it, restarts it and waits for the alert to clear, failing at any step. It
+  refuses to start unless the probe is already passing, so a firing alert afterwards cannot be a
+  pre-existing one. It runs as `observability:verify` in both pipelines.
+
+  Two rules were wrong until they were run, and both corrections are the substance of the tier.
+  The container-memory alert fires at **98%**, not the conventional 90%, because Alfresco idles at
+  95–97% of its cap by measurement — a 90% rule would fire on a healthy stack from day one and be
+  muted within a week. And WAL archiving is alerted on by **backlog**, not by the age of the last
+  archive: all three databases showed a last archive 5–9 hours old with a backlog of zero, which
+  is a healthy *idle* system, because `archive_timeout` does not force a segment switch on a
+  database that has written no WAL.
+
+  **Two live credential leaks were found and closed while instrumenting**, both survivable only
+  while logs stayed on one host. `compliance_import` logged full Alfresco URLs on failure, and
+  operator-ticket verification passes the ticket as a query parameter — so a rejected bearer
+  credential was written to stdout verbatim. And `compliance_web` wrote session ids to stdout.
+  Both are now redacted in the log formatter, where a call site cannot forget.
+
+  **Still open in this tier:** alert *delivery* is not configured (Alertmanager receives, groups
+  and displays; email is a documented uncommenting step, deliberately not pre-filled because a
+  credential in a tracked file is a published credential), the monitoring stack is not itself
+  monitored, Loki retention is 31 days with no offsite shipping, and the stack costs ~1 GiB —
+  which on the 8 GB floor is what pushes a host over, and is part of why it is opt-in.
 
   Worth recording for whoever plans the real deployment: **the field app currently sends the
   shared API key and the inspector's Alfresco password over plain HTTP** to `:1880`, `:8000` and

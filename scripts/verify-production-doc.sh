@@ -181,6 +181,98 @@ UNPINNED=$(grep -hoE '^\s*image:\s+[a-z0-9./_-]+:[a-zA-Z0-9._-]+\s*$' \
 [ "${UNPINNED:-0}" -eq 0 ]
 ok "every external image reference is digest-pinned" $?
 
+banner "Observability and health claims match the tree (P3.5)"
+# The document's P3.5 section is now a claim that things exist, so these run
+# in the fail-if-removed direction, like the hardening checks above.
+
+# Every service the health table names must actually serve /health. Grep for
+# the definition, not for the word: the runbook mentions these paths too.
+grep -q '"url": *"/health"' compliance_flow/flows/17-health.json
+ok "compliance_flow serves GET /health (a flow, so reaching it proves flows.json loaded)" $?
+grep -q 'Alias /health' atrocore-docker/.docker/health.conf
+ok "atrocore-docker serves GET /health" $?
+grep -q "app.get('/health'" compliance_web/server/app.cjs
+ok "compliance_web serves GET /health" $?
+grep -qE '^@app\.get\("/health"\)' compliance_import/main.py
+ok "compliance_import serves GET /health" $?
+
+# ...and the four compose healthchecks the table claims.
+grep -q 'healthcheck:' compliance_flow/docker-compose.yaml
+ok "compliance_flow declares a healthcheck" $?
+# Named, not counted. A count check passed a mutation that deleted the
+# backend's healthcheck, because four of the five remained -- and the backend
+# is the one this tier added and the one every request depends on.
+svc_has_healthcheck() { # svc_has_healthcheck <compose file> <service>
+  awk -v want="$2" '
+    /^  [a-zA-Z0-9_.-]+:/ { svc = $1; sub(/:$/, "", svc) }
+    svc == want && /^    healthcheck:/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+svc_has_healthcheck compliance_web/docker-compose.yml backend
+ok "compliance_web's backend declares a healthcheck" $?
+svc_has_healthcheck compliance_web/docker-compose.yml db
+ok "compliance_web's db declares a healthcheck" $?
+svc_has_healthcheck atrocore-docker/docker-compose.yaml atro-web
+ok "atrocore-docker's atro-web declares a healthcheck" $?
+svc_has_healthcheck atrocore-docker/docker-compose.yaml db
+ok "atrocore-docker's db declares a healthcheck" $?
+
+# The monitoring stack and its drill.
+[ -f atrocore-docker/observability/docker-compose.yaml ]
+ok "the observability stack exists" $?
+[ -x atrocore-docker/scripts/verify-observability.sh ]
+ok "the alerting drill exists and is executable" $?
+grep -q 'observability:verify' atrocore-docker/.gitlab-ci.yml
+ok "observability:verify is wired into CI" $?
+
+# The two probes that catch the measured silent failures. Their absence is the
+# single most consequential thing that could quietly regress here.
+grep -q 'activemq:61616' atrocore-docker/observability/prometheus/prometheus.yml
+ok "ActiveMQ's broker port is probed (the measured silent failure)" $?
+grep -q 'solr6:8983' atrocore-docker/observability/prometheus/prometheus.yml
+ok "Solr is probed" $?
+
+# The document states these two thresholds and explains why each is not the
+# conventional value. If someone "tidies" them to round numbers, the reasoning
+# in the document becomes a lie.
+grep -q 'container_spec_memory_limit_bytes{container!=""} > 0) > 0.98' \
+  atrocore-docker/observability/prometheus/rules/platform-alerts.yml
+ok "the memory alert fires at 98%, not 90% (Alfresco idles at 95-97% of its cap)" $?
+grep -q 'pg_archiver_ready_count' atrocore-docker/observability/prometheus/rules/platform-alerts.yml
+ok "WAL archiving is alerted on by backlog, not by the age of the last archive" $?
+
+# The six auth metrics the readiness doc has named since the auth subsystem
+# shipped, and which P3.5 finally emits.
+for m in auth_login_success_total auth_login_failed_total auth_login_rate_limited_total \
+         auth_session_401_total auth_csrf_mismatch_total auth_session_rotated_total \
+         auth_role_refresh_failed_total; do
+  grep -q "$m" compliance_web/server/metrics/authMetrics.cjs
+  ok "auth metric $m is defined" $?
+done
+
+# Structured logging in the two services that emitted free text.
+[ -f compliance_import/structured_logging.py ] && [ -f compliance_web/server/logging/structuredLogger.cjs ]
+ok "compliance_import and compliance_web both log structured JSON" $?
+
+# Credential redaction. These closed real leaks, so a regression would be
+# silent -- and a grep for the word `alf_ticket` is not enough, because the
+# file explains at length why it redacts it. Exercise the functions instead:
+# deleting the parameter from the list is the mutation that has to fail.
+python3 -c "
+import sys; sys.path.insert(0, 'compliance_import')
+from structured_logging import redact
+sys.exit(0 if redact('http://a?alf_ticket=LIVE') == 'http://a?alf_ticket=[redacted]' else 1)
+" 2>/dev/null
+ok "Alfresco tickets are redacted from compliance_import's logs" $?
+
+node -e "
+const { redact } = require('./compliance_web/server/logging/structuredLogger.cjs');
+const out = redact('sessionId', 'live-session-value');
+process.exit(out !== 'live-session-value' && String(out).startsWith('sha256:') ? 0 : 1);
+" 2>/dev/null
+ok "session ids are digested in compliance_web's logs" $?
+
 banner "Result"
 if [ "$FAILED" -eq 0 ]; then
   green "$CHECKS checks passed — the document matches the tree."

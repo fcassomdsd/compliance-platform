@@ -4,7 +4,7 @@
 **Audience**: Technical stakeholders, operations team, project sponsors
 **Last substantive revision**: 2026-09-26 (re-planned against the current tree; supersedes the 2026-07-30 1.0-draft)
 
-**Status**: **Partially implemented — P3.0 through P3.3 are done; P3.4–P3.7 are not started.**
+**Status**: **Partially implemented — P3.0 through P3.3 and P3.5 are done, P3.4 mostly; P3.6–P3.7 are not started.**
 Landed so far: secrets resolve from files with production refusing published values, a profile-aware
 credential preflight, digest-pinned images everywhere, hash-pinned Python dependencies, Trivy
 scanning and SBOM generation in all six pipelines, container hardening, and a TLS edge with
@@ -703,8 +703,9 @@ are easy to get wrong and are recorded in the scripts rather than left to be red
 > **The hazard this configuration introduces.** With `archive_mode=on`, a failing `archive_command`
 > does not cause PostgreSQL to discard WAL — it retains every segment until archiving succeeds, and
 > the data volume fills until the database stops. This is a new way for the platform to go down and
-> it is silent until it is sudden. `pg_stat_archiver.failed_count` must be on the alert list, which
-> is why it is named in §6.7's observability tier.
+> it is silent until it is sudden. This is now alerted on — `WALArchivingFailing` and
+> `WALArchiveBacklogGrowing` in §6.7 — though not by the `failed_count > 0` rule this note
+> originally called for, which turned out to be the wrong shape: see §6.7 for why.
 
 - Extend `backup-db.sh`/`restore-db.sh` to all three databases **and** the Alfresco content store.
 - WAL archiving; a retention policy; a systemd timer that is itself a tracked artifact.
@@ -714,8 +715,93 @@ are easy to get wrong and are recorded in the scripts rather than left to be red
   labelled as targets.
 - PostgreSQL streaming replication stays deferred with ADR-005.
 
-### 6.7 P3.5 — Observability and health
+### 6.7 P3.5 — Observability and health — **DONE (2026-09-27)**
 *Gate: every service exposes health; one dashboard covers the stack; killing any container fires an alert.*
+
+**The gate is met, and the drill that proves the third clause is a tracked artifact.**
+`atrocore-docker/scripts/verify-observability.sh` stops a container on purpose, waits for the alert
+to reach `firing`, confirms Alertmanager received it, restarts the container and waits for the
+alert to clear — failing if any step does not happen. It refuses to start unless the probe is
+already passing, so a "firing" alert afterwards cannot be one that was already there. It runs as
+`observability:verify` in both pipelines, manual/scheduled like `demo:verify`.
+
+**The measurement that justifies the whole tier.** With ActiveMQ stopped, on 2026-09-27:
+
+```
+Alfresco -ready- probe:                     200
+probe http://proxy:8080/.../probes/-ready-  = 1
+probe http://node-red:1880/health           = 1
+probe http://backend:4000/health            = 1
+probe http://compliance-import:8000/health  = 1
+probe http://atro-web:80/health             = 1
+probe http://share:8080/share               = 1
+```
+
+Every health endpoint on the platform green — Alfresco's own readiness probe included — while
+§5.5's measured behaviour has replanning an existing document hanging forever with no error. The
+TCP probe of `activemq:61616` fired `ActiveMQBrokerUnreachable` 2m16s after the broker stopped.
+Nothing else on this platform notices. That is the gap this tier closes, and it is also why every
+`/health` added here is deliberately **shallow**: a probe that reaches a wedged upstream inherits
+the wedge, so the whole-stack picture has to be composed from outside.
+
+**What shipped.**
+
+| | |
+|---|---|
+| Health endpoints | `compliance_flow` `GET /health` (a `change` node, not a `function` node — see below), `atrocore-docker` `GET /health` |
+| Compose healthchecks | `atro-web`, `atrocore-docker`'s `db`, `compliance_web`'s `backend`, `compliance_flow`'s `node-red` |
+| Monitoring | `atrocore-docker/observability/` — Prometheus, Alertmanager, Grafana, Loki, Promtail, cAdvisor, node-exporter, blackbox-exporter, three postgres-exporters |
+| Alerts | 15 rules in four groups: availability, data safety, and authentication |
+| Dashboard | One, `Compliance Platform — Overview`, 17 panels, provisioned from git |
+| Auth metrics | The six from `AUTH_CHUNK8_OPERATIONAL_READINESS.md` §6, on `compliance_web`'s `GET /metrics` |
+| Structured logging | `compliance_import` and `compliance_web`, JSON with a correlation id |
+
+**Three decisions worth carrying forward, each of which came from running the thing.**
+
+- **A thresholds-from-measurement rule.** The container-memory alert fires at **98% for 15
+  minutes**, not the conventional 90%, because §3 measured Alfresco idling at 95–97% of its cap. A
+  90% rule would fire on a healthy stack from the day it was deployed and be muted within a week —
+  and a muted rule is worse than no rule, because it looks like coverage.
+- **A WAL rule that was wrong until it was run.** Archiving was first alerted on by *age*:
+  "`archive_timeout` is 300s, so nothing archived in an hour is a fault." All three databases then
+  reported a last archive 5–9 hours old with a backlog of **zero** — a healthy *idle* system, because
+  `archive_timeout` does not force a segment switch on a database that has written no WAL. The rule
+  now watches the backlog (`pg_ls_archive_statusdir()`), which only rises when there is something to
+  archive and it is not being archived. Relatedly, "is archiving failing" is computed as *last
+  attempt failed and none has succeeded since*, not `failed_count > 0`: the reference Alfresco
+  database reads `failed_count=9, failing=0`, having had a rough patch and recovered.
+- **A hang is the failure mode to design against.** `compliance_flow`'s `/health` first used a
+  `function` node calling `process.uptime()`, which the Node-RED sandbox does not expose. The
+  function threw, no response was sent, and the endpoint accepted connections and hung until the
+  client timed out — a liveness probe reproducing the exact failure this platform is worst at. A
+  `change` node setting a static payload has nothing to throw. Every blackbox probe carries a 5s
+  timeout for the same reason.
+
+**Two live leaks found and closed while instrumenting**, both of which were survivable only while
+logs stayed on one host:
+
+- `compliance_import` logged `response.request.url` on any Alfresco failure, and
+  `resolve_ticket_identity` calls Alfresco with `params={"alf_ticket": ticket}` — so a rejected
+  operator ticket was written to stdout **in full**. An Alfresco ticket is a bearer credential.
+  Redaction now happens in the log formatter, where it cannot be forgotten at a call site, and it
+  applies in text mode as well as JSON.
+- `compliance_web` wrote session ids to stdout. The `auth_audit_event` table keeps the full value —
+  it is access-controlled and it is the record of who did what — but stdout is now shipped to an
+  aggregator that many more people can read, and anyone holding a session id holds the session.
+  Log output carries a stable short digest instead: still correlatable, useless for resuming.
+
+**Still open in this tier:**
+
+- **Alert delivery is not configured.** Alertmanager ships with a receiver that notifies nobody;
+  alerts are received, grouped, inhibited and visible, which is what the drill asserts. Email is a
+  documented uncommenting step, deliberately not pre-filled because Alertmanager does not expand
+  environment variables in its config and a credential in a tracked file is a published credential.
+- **The monitoring stack is not itself monitored**, and nothing watches whether Prometheus is up.
+- **Loki retention is 31 days** and nothing ships logs offsite.
+- **The observability stack costs ~1 GiB**, which on the 8 GB floor in §3 is what pushes a host over.
+  It is opt-in for that reason as much as for the demo's sake.
+
+The original tier plan follows.
 
 - Add `/health` to **`compliance_flow`** (a new `http in` node — edit under `flows/`, then re-assemble
   `data/flows.json` via `scripts/assemble-flows.mjs`; never hand-edit the generated file) and to
