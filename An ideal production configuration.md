@@ -564,9 +564,20 @@ while its own guard refused that same configuration as production.
 > 2. **"Fails on a HIGH CVE" would have arrived red.** Measured on 2026-09-26: **zero CRITICAL**
 >    across all six repos, but **33 HIGH**, all with fixes available (21 `compliance_web`, 12
 >    `compliance_checklist`). A gate that is red on arrival gets switched off within a day, and a
->    disabled gate is worse than none because it still reads as protection. So CRITICAL blocks
->    today and HIGH is reported; the bar rises once the backlog clears. **That backlog is now the
->    tier's main follow-on item.**
+>    disabled gate is worse than none because it still reads as protection. So CRITICAL blocked
+>    and HIGH was reported, with the bar to rise once the backlog cleared.
+>
+>    **Closed 2026-09-29.** The backlog is cleared and the bar has risen: CRITICAL **and** HIGH
+>    both block now, fixable-only, in all twelve pipeline files. Re-measured on the day, the
+>    count was 37 rather than 33 — one newly disclosed advisory, and three from P3.6 having moved
+>    `js-yaml` out of the dev-only tree by adding `electron-updater` as a *runtime* dependency.
+>    Nothing new was installed there; a dependency became one that ships, and a devDependency's
+>    CVEs are not the product's while a runtime dependency's are.
+>
+>    Each repository carries a documented, empty `.trivyignore` as the sanctioned exception path,
+>    because a blocking gate with no exception path gets weakened the first time it is
+>    inconvenient. It is passed explicitly rather than found by working directory — verified that
+>    this matters, since Trivy silently ignored the file when the cwd was not the scan root.
 
 **Delivered.** Every external image digest-pinned across all six repos (a tag is a mutable pointer;
 a tag-only pin does not describe a reproducible build). `compliance_import`'s dependencies pinned

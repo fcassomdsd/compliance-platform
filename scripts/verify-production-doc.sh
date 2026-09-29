@@ -273,6 +273,46 @@ process.exit(out !== 'live-session-value' && String(out).startsWith('sha256:') ?
 " 2>/dev/null
 ok "session ids are digested in compliance_web's logs" $?
 
+banner "The CVE gate is raised, not just claimed"
+# The document says CRITICAL and HIGH both block. That is a claim about
+# twelve CI files, and the failure mode if it drifts is silent: the pipeline
+# stays green while the control is gone.
+GATED=0
+UNGATED=""
+for repo in atrocore-docker compliance_cmis compliance_flow compliance_import compliance_web compliance_checklist; do
+  if grep -q 'severity CRITICAL,HIGH .*--exit-code 1' "$repo/.gitlab-ci.yml" 2>/dev/null; then
+    GATED=$((GATED + 1))
+  else
+    UNGATED="$UNGATED $repo"
+  fi
+done
+[ "$GATED" -eq 6 ]
+ok "all six GitLab pipelines block on fixable CRITICAL+HIGH${UNGATED:+ (missing:$UNGATED)}" $?
+
+GH_GATED=0
+for repo in atrocore-docker compliance_cmis compliance_flow compliance_import compliance_web compliance_checklist; do
+  grep -q "severity: CRITICAL,HIGH" "$repo/.github/workflows/ci.yml" 2>/dev/null && GH_GATED=$((GH_GATED + 1))
+done
+[ "$GH_GATED" -eq 6 ]
+ok "all six GitHub mirrors match" $?
+
+# The exception path has to exist, or the gate gets weakened instead of used.
+IGNORES=0
+for repo in atrocore-docker compliance_cmis compliance_flow compliance_import compliance_web compliance_checklist; do
+  [ -f "$repo/.trivyignore" ] && IGNORES=$((IGNORES + 1))
+done
+[ "$IGNORES" -eq 6 ]
+ok "every repository has a .trivyignore exception path" $?
+
+# Passed explicitly, not found by working directory. Verified that Trivy
+# silently ignores the file otherwise.
+EXPLICIT=0
+for repo in atrocore-docker compliance_cmis compliance_flow compliance_import compliance_web compliance_checklist; do
+  grep -q -- "--ignorefile .trivyignore" "$repo/.gitlab-ci.yml" 2>/dev/null && EXPLICIT=$((EXPLICIT + 1))
+done
+[ "$EXPLICIT" -eq 6 ]
+ok "the ignore file is passed explicitly, not left to the working directory" $?
+
 banner "Result"
 if [ "$FAILED" -eq 0 ]; then
   green "$CHECKS checks passed — the document matches the tree."
