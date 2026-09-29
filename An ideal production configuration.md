@@ -395,12 +395,22 @@ already terminates the SPA and proxies both `/api/` and `/nodered/`. It currentl
 > **RPO.** WAL archiving is configured on all three databases with
 > `archive_timeout=300`, which forces a segment switch every five minutes even on an idle
 > database — so the exposure window is five minutes, not the nightly backup interval. Point-in-time
-> recovery was proven end to end on a throwaway instance: a base backup, then rows committed before
-> and after a chosen timestamp, then recovery to that timestamp. PostgreSQL logged
-> `recovery stopping before commit of transaction 734` and `archive recovery complete`, and the
-> recovered database held the "before" rows and **not** the "after" ones. The 15-minute figure is
-> therefore conservative rather than aspirational. What has *not* been done is a PITR drill against
-> this platform's own stack — the mechanism is proven, the runbook for it is not.
+> recovery is now proven **against this platform's own stack**, not only on a throwaway instance:
+> `atrocore-docker/scripts/verify-pitr.sh` takes a base backup, commits a row, takes a target time,
+> commits a second row, forces a WAL switch, and recovers to the target — asserting the **second
+> row is absent**. Against the live AtroCore database on 2026-09-29, using a base backup from a
+> real stored set: 3 WAL segments replayed from the archive, `recovery stopping before commit of
+> transaction 46471, time 2026-09-29 17:37:29.800322+00`, the first row present, the second absent,
+> and the live database untouched. `scripts/restore-pitr.sh` is the operator tool and runbook §7.12
+> the procedure. The 15-minute figure is therefore conservative rather than aspirational.
+>
+> **That drill's first run found the RPO path was broken for AtroCore.** `backup-platform.sh`
+> passed the application role to `pg_basebackup`, which needs REPLICATION, so AtroCore's base
+> backup had **never once been produced** — and because the failure only warned, every set still
+> reported itself complete. WAL was being archived faithfully onto a base that did not exist. Fixed,
+> and a failed base backup now fails the run rather than warning; the MANIFEST states per dataset
+> whether that set can recover to a point in time. Until 2026-09-29 the RPO claim above was true of
+> two databases out of three, and nothing in the system said so.
 >
 > **RTO.** Still a target. The `restore:verify` drill has run — three schemas dropped to zero
 > tables and the content store wiped to zero files, both asserted, then restored from a
@@ -716,11 +726,13 @@ on the MANIFEST parser below.
 
 **Still open in this tier:**
 
-- **A PITR drill against this platform's own stack.** Restoring a *set* is now proven end to end.
-  Replaying WAL onto a base backup to reach a chosen point in time is still only proven on a
-  throwaway instance, and the platform-specific runbook for it is not written.
+- ~~A PITR drill against this platform's own stack.~~ **Done (2026-09-29)** — see §5.2.
+  `scripts/verify-pitr.sh` (13 checks, `pitr:verify` in CI) and `scripts/restore-pitr.sh`, with
+  runbook §7.12 as the procedure. Drilled on AtroCore only; the same tool covers `alfresco` and
+  `compliance_web` via `--dataset` but neither has been run yet.
 - **RTO has not been timed.** The restore above completed without incident but was not measured,
-  and it was a ~681 MB set rather than production-sized data. The §5.2 figure stays a target.
+  and it was a ~681 MB set rather than production-sized data. The PITR drill measures nothing
+  either: AtroCore's database is 59 MB and recovers in seconds. The §5.2 figure stays a target.
 - **Client-side encryption is not implemented.** Required before trusting a third-party
   destination, and it carries a key-escrow decision: an encrypted backup with a lost key is not
   a backup.
