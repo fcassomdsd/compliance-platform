@@ -751,15 +751,21 @@ on the MANIFEST parser below.
   databases live in sibling repos CI does not check out — and that is the dataset whose settings
   are all defaults, so a green pipeline is not evidence about the other two. Drill those by hand
   against a full local stack.
-- **The WAL archive is never pruned, and the disk is the failure mode.** There is no
-  `pg_archivecleanup` anywhere in the tree. Measured 2026-09-29, ~2.5 days after archiving was
-  switched on: 5.5 GB / 350 segments for Alfresco, 1.2 GB / 85 for AtroCore, 529 MB / 37 for
-  compliance_web — about **3 GB/day, growing without bound**, on a host that is now at 99%. This
-  meets the hazard below from the other direction: the archive does not need a *failing*
-  `archive_command` to fill the volume, it only needs time. Pruning must be anchored to the
-  oldest base backup still retained rather than a blind age cutoff — the archive already holds
-  the `*.backup` label files that mark those boundaries — so it belongs with
-  `backup-platform.sh`'s retention policy. Not implemented.
+- ~~The WAL archive is never pruned, and the disk is the failure mode.~~ **Done (2026-09-29).**
+  Measured ~2.5 days after archiving was switched on: 5.5 GB / 350 segments for Alfresco, 1.2 GB
+  / 85 for AtroCore, 529 MB / 37 for compliance_web — about **3 GB/day, growing without bound**,
+  on a host that had reached 99%. This met the hazard below from the other direction: the archive
+  does not need a *failing* `archive_command` to fill the volume, it only needs time.
+  `atrocore-docker/scripts/prune-wal-archive.sh` now cuts the archive at the START WAL of the
+  **oldest retained base backup**, read out of that backup's own `backup_label`, and
+  `backup-platform.sh` calls it after set retention — so WAL retention follows set retention
+  instead of a blind age cutoff. With no base backup to anchor to it refuses and exits non-zero
+  rather than freeing the disk. `ship-wal-archive.sh --prune-local` previously enforced only
+  "shipped and older than N days", with the anchor rule written in a comment for the operator to
+  honour; both paths now share `wal-anchor.lib.sh`. First run: 492 segments removed, the disk
+  from 99% to 87%, and all three PITR drills re-run afterwards against that set's stored base
+  backups at 13/13 each. Conformance test `verify-wal-pruning.sh`, 18 checks,
+  `validate:wal-retention` as a merge gate.
 - **RTO has not been timed.** The restore above completed without incident but was not measured,
   and it was a ~681 MB set rather than production-sized data. The PITR drill measures nothing
   either: AtroCore's database is 59 MB and recovers in seconds. The §5.2 figure stays a target.
