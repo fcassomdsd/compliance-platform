@@ -412,6 +412,25 @@ already terminates the SPA and proxies both `/api/` and `/nodered/`. It currentl
 > whether that set can recover to a point in time. Until 2026-09-29 the RPO claim above was true of
 > two databases out of three, and nothing in the system said so.
 >
+> **Drilling the other two datasets found two more defects, both fatal to a real recovery**
+> (2026-09-29). The AtroCore drill had been green throughout, and told us less than it appeared
+> to: AtroCore is the one database whose PostgreSQL settings are all defaults. `--dataset alfresco`
+> aborted on startup with `recovery aborted because of insufficient parameter settings —
+> max_connections = 100 is a lower setting than on the primary server, where its value was 300`;
+> a recovering server refuses to start when the shared-memory sizing parameters are below the
+> primary's, and Alfresco sets `max_connections=300` on its compose `command:` line, which no base
+> backup contains. `restore-pitr.sh` now reads those values from the backup's own `pg_control`
+> with `pg_controldata` — from the backup, not the live server, because the tool has to work with
+> the source host gone. Separately, both scripts queried the recovered instance as `postgres`,
+> which is correct only for AtroCore: a physical backup carries the source cluster's roles, and
+> neither Alfresco's (`alfresco`) nor compliance_web's (`compliance`) cluster has a `postgres`
+> role at all. Behind the scripts' own `2>/dev/null` this read empty rather than erroring, so a
+> successful recovery timed out after 240s and every assertion would have reported a working
+> recovery as a missing table. **All three datasets now pass 13/13** — AtroCore (PG 15), Alfresco
+> (PG 16.5, stopping before transaction 1814838) and compliance_web (PG 16, stopping before
+> transaction 915), each with 3 segments replayed, the first row present, the second absent, and
+> the live database untouched.
+>
 > **RTO.** Still a target. The `restore:verify` drill has run — three schemas dropped to zero
 > tables and the content store wiped to zero files, both asserted, then restored from a
 > checksum-verified set with every metric matching (155/70/9 tables, 299 content files, the demo
@@ -726,10 +745,21 @@ on the MANIFEST parser below.
 
 **Still open in this tier:**
 
-- ~~A PITR drill against this platform's own stack.~~ **Done (2026-09-29)** — see §5.2.
-  `scripts/verify-pitr.sh` (13 checks, `pitr:verify` in CI) and `scripts/restore-pitr.sh`, with
-  runbook §7.12 as the procedure. Drilled on AtroCore only; the same tool covers `alfresco` and
-  `compliance_web` via `--dataset` but neither has been run yet.
+- ~~A PITR drill against this platform's own stack.~~ **Done (2026-09-29), all three databases**
+  — see §5.2. `scripts/verify-pitr.sh` (13 checks) and `scripts/restore-pitr.sh`, with runbook
+  §7.12 as the procedure. `pitr:verify` in CI covers **atrocore only**, because the other two
+  databases live in sibling repos CI does not check out — and that is the dataset whose settings
+  are all defaults, so a green pipeline is not evidence about the other two. Drill those by hand
+  against a full local stack.
+- **The WAL archive is never pruned, and the disk is the failure mode.** There is no
+  `pg_archivecleanup` anywhere in the tree. Measured 2026-09-29, ~2.5 days after archiving was
+  switched on: 5.5 GB / 350 segments for Alfresco, 1.2 GB / 85 for AtroCore, 529 MB / 37 for
+  compliance_web — about **3 GB/day, growing without bound**, on a host that is now at 99%. This
+  meets the hazard below from the other direction: the archive does not need a *failing*
+  `archive_command` to fill the volume, it only needs time. Pruning must be anchored to the
+  oldest base backup still retained rather than a blind age cutoff — the archive already holds
+  the `*.backup` label files that mark those boundaries — so it belongs with
+  `backup-platform.sh`'s retention policy. Not implemented.
 - **RTO has not been timed.** The restore above completed without incident but was not measured,
   and it was a ~681 MB set rather than production-sized data. The PITR drill measures nothing
   either: AtroCore's database is 59 MB and recovers in seconds. The §5.2 figure stays a target.
