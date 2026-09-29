@@ -431,14 +431,38 @@ already terminates the SPA and proxies both `/api/` and `/nodered/`. It currentl
 > transaction 915), each with 3 segments replayed, the first row present, the second absent, and
 > the live database untouched.
 >
-> **RTO.** Still a target. The `restore:verify` drill has run — three schemas dropped to zero
-> tables and the content store wiped to zero files, both asserted, then restored from a
-> checksum-verified set with every metric matching (155/70/9 tables, 299 content files, the demo
-> row) and the gateway smoke matrix at 15/15 afterwards. That establishes a backup **restores a
-> working system**. It does not time one: the drill runs against the demo dataset, not
-> production-sized data. The 1.0 draft's 2-hour RTO assumed a warm standby to promote; on a single host with
-> restore-from-backup, 4 hours is the honest number until a drill proves otherwise. Do not quote
-> either figure to a stakeholder as a commitment before the drill has run.
+> **RTO. Measured 2026-09-29: 1m40s on this dataset**, by
+> `atrocore-docker/scripts/measure-rto.sh`. The 1.0 draft's 2-hour figure assumed a warm standby
+> this architecture does not have, and nothing had ever timed a recovery.
+>
+> **The clock deliberately stops later than the restore does.** `restore:verify` proved a backup
+> **restores a working system** — three schemas dropped to zero tables, the content store wiped
+> to zero files, both asserted, then restored with every metric matching and the gateway smoke
+> matrix at 15/15. But it stops there, and it *tolerates a partially failing smoke matrix as
+> "expected while Solr reindexes"*. Solr is derived state and deliberately not backed up, so on a
+> blank host it does not exist — and the reads that depend on it are the checklist endpoint, open
+> findings and four report Web Scripts. A recovery that has restored every byte and cannot answer
+> *which findings are open* has not recovered. So the measurement removes Solr's index before
+> restoring and runs the clock until the index is rebuilt and the smoke matrix passes.
+>
+> Two runs, 1m50s and 1m40s, restoring a 690 MB set (1,242 indexed nodes, 6,317 content files).
+> Breakdown of the second: teardown 12.3s, verify 1.8s, content store 7.6s (104 MB/s), databases
+> 8.5s, Alfresco ready 40.4s, **search correct again 23.1s**, smoke 6.8s. Afterwards
+> `H-ZZZZA0001-ATS-001` was findable **by search** in its exact state, `Pending Closure Approval`,
+> which proves the rebuilt index rather than only the database.
+>
+> **At this scale the platform is dominated by fixed cost**: 59.8s of the 100s is teardown, JVM
+> startup and the smoke matrix and does not grow with data. Everything that scales is 41s, 23s of
+> it indexing. Scaling only the size-dependent terms, **250,000 nodes and 200 GB of content
+> projects to about 2.6 hours, ~78 minutes of it reindexing** — arithmetic on one measurement, not
+> a second measurement, and it reads **low**: Solr indexes during Alfresco's boot at this size, so
+> work that is currently charged to the fixed term will not be once indexing outlasts startup (the
+> wall-clock rate is 18.7 ms/node against Solr's own 9.9 ms/node mean).
+>
+> **So: quote 4 hours.** The measurement and the projection both sit inside it, it retains margin
+> for the three caveats above and for fetching a set from offsite, and it is now a number with
+> evidence under it rather than an inheritance from a design document. What remains unmeasured is
+> production-sized data, and no arithmetic substitutes for that.
 
 ### 5.3 Backup Coverage
 
@@ -766,9 +790,12 @@ on the MANIFEST parser below.
   from 99% to 87%, and all three PITR drills re-run afterwards against that set's stored base
   backups at 13/13 each. Conformance test `verify-wal-pruning.sh`, 18 checks,
   `validate:wal-retention` as a merge gate.
-- **RTO has not been timed.** The restore above completed without incident but was not measured,
-  and it was a ~681 MB set rather than production-sized data. The PITR drill measures nothing
-  either: AtroCore's database is 59 MB and recovers in seconds. The §5.2 figure stays a target.
+- ~~RTO has not been timed.~~ **Timed (2026-09-29)** — see §5.2. 1m40s to a searching, serving
+  system, with the fixed/size-dependent split measured and a projection to 250,000 nodes.
+  `scripts/measure-rto.sh`; every restore now records its phase timings and `restore:verify`
+  publishes them as an artifact. **Still not measured on production-sized data**, which is the
+  part no arithmetic replaces — the projection is explicitly labelled as arithmetic on one
+  measurement.
 - **Client-side encryption is not implemented.** Required before trusting a third-party
   destination, and it carries a key-escrow decision: an encrypted backup with a lost key is not
   a backup.
