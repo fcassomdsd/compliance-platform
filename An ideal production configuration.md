@@ -702,14 +702,30 @@ are easy to get wrong and are recorded in the scripts rather than left to be red
 - `pg_basebackup -Xs` cannot write a tar to stdout. `-Xf` is used instead, which is safe precisely
   because archiving is on — any WAL it needs is also in the archive.
 
+**Offsite is done, and the restore from it is proven (2026-09-29).** Backup sets and WAL now
+leave the host through a pluggable destination driver (`local`, `rsync-ssh`, `s3`), on systemd
+timers, with Prometheus alerts that fire on `absent()` so a timer nobody enabled is itself an
+alert. The full loop was exercised end to end against the live platform: a set taken, pushed
+offsite, **pulled back from the offsite copy**, and restored — after which the three databases
+returned 155/70/9 tables, the content store 6,271 files, all seven inspection folders were
+present, the gateway smoke matrix passed 15/15 and finding `H-ZZZZA0001-ATS-001` came back in its
+exact workflow state, `Pending Closure Approval`. Not row counts: the business state.
+
+That drill also exposed a defect that had made the whole restore path unusable — see §6.6's note
+on the MANIFEST parser below.
+
 **Still open in this tier:**
 
-- **A PITR drill against this platform's own stack.** The mechanism is proven on a throwaway
-  instance; the platform-specific runbook is not written or exercised.
-- **RTO has not been timed** on production-sized data.
-- **The archive is not shipped offsite** and is not pruned. A full archive volume stops the
-  database — see the hazard note below.
-- `restore:verify` is wired as manual/scheduled, like `demo:verify`. Nothing schedules it yet.
+- **A PITR drill against this platform's own stack.** Restoring a *set* is now proven end to end.
+  Replaying WAL onto a base backup to reach a chosen point in time is still only proven on a
+  throwaway instance, and the platform-specific runbook for it is not written.
+- **RTO has not been timed.** The restore above completed without incident but was not measured,
+  and it was a ~681 MB set rather than production-sized data. The §5.2 figure stays a target.
+- **Client-side encryption is not implemented.** Required before trusting a third-party
+  destination, and it carries a key-escrow decision: an encrypted backup with a lost key is not
+  a backup.
+- **`restore:verify` still has no schedule**, and it does not route through an offsite
+  destination. Its absence is exactly why the MANIFEST parser defect survived undetected.
 
 > **The hazard this configuration introduces.** With `archive_mode=on`, a failing `archive_command`
 > does not cause PostgreSQL to discard WAL — it retains every segment until archiving succeeds, and
