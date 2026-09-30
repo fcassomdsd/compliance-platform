@@ -815,9 +815,20 @@ on the MANIFEST parser below.
   §5.2 rather than waiting on escrow. The threat addressed is the copy held by someone else; a
   stolen backup volume is a different decision and this is not it.
 
+  **Escrow is configurable as two keys, not one.** `BACKUP_AGE_RECIPIENT` takes a list and any
+  one matching private key opens a set, so the recommended shape is an *operations* key in the
+  organisation's vault (routine restores, the quarterly drill) plus a *break-glass* key on sealed
+  paper or split across officers (a real disaster, under a signed procedure). Either rotates
+  independently. A single recipient warns rather than fails, because one key is a single point of
+  failure in the one situation where you cannot afford one. Rotation has a tail: a set stays
+  encrypted to the keys it was made with, so escrow must retain every key still covering a set
+  inside the retention window.
+
   **The key-escrow decision stays with the deploying authority** and is the part that matters —
   an encrypted backup whose key is lost is not a backup. Runbook §7.15 says to test the
-  retrieval, not just the encryption.
+  retrieval, not just the encryption: quarterly, someone who did not create the key follows the
+  written procedure, retrieves it, and decrypts a set taken *that quarter*, timed — because the
+  retrieval time is part of the offsite RTO.
 - ~~`restore:verify` has no schedule, and does not route through an offsite destination.~~ **Both
   were already true and this bullet was stale.** A weekly schedule exists (Sundays 03:00 UTC, on
   `develop`), and the job has routed through an offsite destination since that work landed —
