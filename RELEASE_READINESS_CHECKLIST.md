@@ -261,7 +261,7 @@ every workstream's full writeup.
   What shipped: `/health` on `compliance_flow` and `atrocore-docker` (the two that lacked one),
   compose healthchecks on the four services with none, a Prometheus/Alertmanager/Grafana/Loki
   stack under `atrocore-docker/observability/` as a **separate opt-in Compose project** so the
-  lean demo is untouched, 15 alert rules, one 17-panel dashboard, the six auth metrics
+  lean demo is untouched, 22 alert rules, one 17-panel dashboard, the six auth metrics
   `AUTH_CHUNK8_OPERATIONAL_READINESS.md` §6 has named since the auth subsystem shipped, and
   structured JSON logging in the two services that emitted free text.
 
@@ -285,11 +285,20 @@ every workstream's full writeup.
   credential was written to stdout verbatim. And `compliance_web` wrote session ids to stdout.
   Both are now redacted in the log formatter, where a call site cannot forget.
 
-  **Still open in this tier:** alert *delivery* is not configured (Alertmanager receives, groups
-  and displays; email is a documented uncommenting step, deliberately not pre-filled because a
-  credential in a tracked file is a published credential), the monitoring stack is not itself
-  monitored, Loki retention is 31 days with no offsite shipping, and the stack costs ~1 GiB —
-  which on the 8 GB floor is what pushes a host over, and is part of why it is opt-in.
+  **Alert delivery closed 2026-09-30.** It was open here because the drill stopped at
+  "Alertmanager holds the alert", which is not delivery — a receiver with no notifier configured
+  reaches exactly that state and looks identical. The default config now delivers to a MailPit
+  sink inside the Compose project, and `verify-observability.sh` asserts both the notification and
+  its recovery notice actually arrived, the latter against a deadline read from Alertmanager's own
+  `group_interval` rather than a guessed one. What still deliberately does not ship is a *real*
+  destination: that is the adopter's relay, domain and on-call arrangement, so
+  `alertmanager.yml` carries a webhook and an email block side by side for them to fill in, and
+  `preflight-secrets.sh --production` refuses a deployment that still points at the demo sink or
+  configures no notifier at all. See `COUNTRY_ADAPTATION_GUIDE.md` §8.
+
+  **Still open in this tier:** the monitoring stack is not itself monitored, Loki retention is
+  31 days with no offsite shipping, and the stack costs ~1 GiB — which on the 8 GB floor is what
+  pushes a host over, and is part of why it is opt-in.
 
   Worth recording for whoever plans the real deployment: **the field app currently sends the
   shared API key and the inspector's Alfresco password over plain HTTP** to `:1880`, `:8000` and
