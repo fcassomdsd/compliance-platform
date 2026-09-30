@@ -313,6 +313,37 @@ done
 [ "$EXPLICIT" -eq 6 ]
 ok "the ignore file is passed explicitly, not left to the working directory" $?
 
+
+# ---------------------------------------------------------------------------
+banner "The \"no IdP is required\" claim, against the tree"
+# ---------------------------------------------------------------------------
+# A claim that only checks its own prose guards nothing. Both halves are
+# asserted: the document still makes the claim, AND the tree still makes it
+# true. When someone builds the IdP shape these fail, which is the point --
+# the person who builds it is the person who should rewrite the paragraph.
+idp_tree_is_unbuilt() { # prints what it found, returns 1 if any evidence of an IdP build
+  local found=""
+  grep -qiE '"(openid-client|oidc-[a-z-]+|passport-openidconnect|keycloak[a-z-]*)"' \
+    compliance_web/package.json 2>/dev/null && found="${found} an OIDC client dependency;"
+  grep -qi 'provider' compliance_web/server/auth/config.cjs 2>/dev/null \
+    && found="${found} an auth provider key in AUTH_CONFIG;"
+  grep -q 'alfrescoClient.createTicket(' compliance_web/server/auth/router.cjs 2>/dev/null \
+    || found="${found} login no longer calling alfrescoClient.createTicket directly;"
+  grep -qiE 'device_code|device-code|devicecode' \
+    compliance_checklist/electron/ipc/ipcHandles.js 2>/dev/null \
+    && found="${found} a device-code flow in the field app;"
+  [ -z "${found}" ] || { printf '%s' "${found}"; return 1; }
+  return 0
+}
+
+grep -qF 'Only the first column exists as running code today' "$DOC"
+ok "§6.9 still states that only the no-IdP column is running code" $?
+
+EVIDENCE="$(idp_tree_is_unbuilt)"
+RC=$?
+[ "$RC" -eq 0 ]
+ok "the tree agrees — nothing of the IdP shape is built${EVIDENCE:+ (found:${EVIDENCE})}" $?
+
 banner "Result"
 if [ "$FAILED" -eq 0 ]; then
   green "$CHECKS checks passed — the document matches the tree."
