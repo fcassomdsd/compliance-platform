@@ -4,9 +4,9 @@
 
 This platform is a **reference implementation**, not a generic multi-tenant product. It was built for one specific civil aviation authority — the Dominican Republic's IDAC (Instituto Dominicano de Aviación Civil) — and most of that authority's own branding, specialty taxonomy, CAP-evaluation checklist, and provider structure are baked into the code and seed data, not abstracted behind configuration. The report headers are now the exception: they are generic by default and fully configuration-driven (§2).
 
-Adapting it for a different CAA is a **configuration and data exercise, not a rewrite**: nothing here requires touching the domain model, the finding/CAP/follow-up lifecycle, the USOAP citation chain, or any webscript's business logic. But it does touch **all six repos**, and some of the substitutions below have real one-way consequences (see §3's warning about document IDs). Budget more than an afternoon — the effort table in §8 gives a per-item estimate, but plan on this being a multi-day project for a first adaptation, most of it in §4 (rebuilding the CAP checklist) and §6 (populating your own national regulation catalog).
+Adapting it for a different CAA is a **configuration and data exercise, not a rewrite**: nothing here requires touching the domain model, the finding/CAP/follow-up lifecycle, the USOAP citation chain, or any webscript's business logic. But it does touch **all six repos**, and some of the substitutions below have real one-way consequences (see §3's warning about document IDs). Budget more than an afternoon — the effort table in §9 gives a per-item estimate, but plan on this being a multi-day project for a first adaptation, most of it in §4 (rebuilding the CAP checklist) and §6 (populating your own national regulation catalog).
 
-The sections below are ordered easiest-to-hardest, so start at the top and stop whenever the remaining sections don't apply to your authority yet (e.g., you can run a fully working demo after §2 alone, with the reports already carrying your name and logo while everything else still shows the reference data).
+Sections 2–7 are ordered easiest-to-hardest, so start at the top and stop whenever the remaining sections don't apply to your authority yet (e.g., you can run a fully working demo after §2 alone, with the reports already carrying your name and logo while everything else still shows the reference data).
 
 **What you get without touching anything**: the ICAO-standard parts. The USOAP Critical Elements (`CE-1`...`CE-8`), the Nomenclatura document-ID scheme's structure (ICAO 4-letter location codes), and — as of this platform's ICAO reference-data seed — the full catalog of ICAO Annex documents, Annex paragraphs, and USOAP Protocol Questions (15 documents / 1,890 paragraphs / 281 questions, `atrocore-docker/scripts/seed-icao-reference-data.sh`) are all genuinely CAA-independent and ship correctly for any authority out of the box. Nothing in this guide touches them.
 
@@ -127,7 +127,63 @@ The folder *names in Spanish* (`Inspecciones`, `Hallazgos`, etc.) are separate f
 
 ---
 
-## 8. Summary table
+## 8. Where your alerts go
+
+*Out of the effort order above, because it is a deployment step rather than a
+substitution — but do not skip it.*
+
+Unlike everything above, this is not a substitution — there is nothing to
+replace, because the platform deliberately ships **no alert destination at
+all**. Where alerts go is your infrastructure, not the project's: your relay,
+your domain, your on-call arrangement. A destination chosen here would be one
+nobody at your authority is reading.
+
+What the platform does provide is 22 alert rules, the routing, grouping and
+inhibition around them, and a drill that proves a real failure reaches a real
+recipient. The last link is yours to attach.
+
+**The two files**, in `atrocore-docker/observability/alertmanager/`:
+
+| `ALERTMANAGER_CONFIG` | file | delivers to |
+|---|---|---|
+| *(unset — the default)* | `alertmanager.demo.yml` | a MailPit container inside the compose project |
+| `alertmanager.yml` | `alertmanager.yml` | whatever you configure |
+
+The default delivers to **MailPit**, a test sink that accepts any mail and
+exposes it at `http://127.0.0.1:8025`. It exists so `verify-observability.sh`
+can *assert* that a notification was sent, rather than asking someone to look
+in an inbox. It is not delivery: it runs on the same host as the platform it
+watches and dies with it.
+
+**Email is not the only option, and often not the easiest.** Alertmanager
+supports `webhook_configs`, `slack_configs`, `msteams_configs`,
+`opsgenie_configs` and `pagerduty_configs`, and
+`scripts/preflight-secrets.sh --production` accepts any of them. A webhook
+into a ticketing system or a chat channel an operator already has open is
+frequently less work than getting an SMTP relay provisioned, and it can avoid
+putting a credential in a tracked file entirely. `alertmanager.yml` shows a
+webhook and an email block side by side.
+
+**To adapt**: fill in `alertmanager.yml` — **both** receivers, not just
+`platform-critical`; the warning-severity route carries `DiskFillingUp`, which
+is what fills a WAL archive and stops a database — then set
+`ALERTMANAGER_CONFIG=alertmanager.yml` and run
+`scripts/preflight-secrets.sh --production`. It fails if the demo sink is
+still selected, if the file is missing, or if it configures no notifier at
+all, so an incomplete edit is caught before deployment rather than during an
+incident. Prove the whole path with `scripts/verify-observability.sh`, which
+stops a container and asserts both the alert and its recovery notice arrive.
+
+Keep `send_resolved: true` whichever transport you choose. A path that only
+ever reports failures leaves an operator unable to tell a fixed incident from
+a forgotten one.
+
+**Effort: low** — one file, one variable, and a drill that tells you whether
+you got it right.
+
+---
+
+## 9. Summary table
 
 | # | What | File(s) | Repo | Effort |
 |---|---|---|---|---|
@@ -137,6 +193,7 @@ The folder *names in Spanish* (`Inspecciones`, `Hallazgos`, etc.) are separate f
 | 5 | Provider/smart-folder templates | `tools/smart-folder-catalog.json`; `templates/pilot/*.json` | compliance_cmis | Moderate |
 | 6 | Regulation catalog | `Normativa`/`Reglamento` entity data via `data-packs/{Reglamento,Normativa}.csv` (or the admin UI; no schema change) | atrocore-docker | Low (mechanism), scales with corpus size |
 | 7 | Site/folder naming | `scripts/bootstrap-site-content.sh`; `webscripts/common/vso-paths.lib.js`; inlined copies (`npm run verify:paths` finds them) | compliance_cmis | Involved (inconsistent parameterization) |
+| 8 | **Alert destination** (nothing ships configured — see §8) | `observability/alertmanager/alertmanager.yml`; `ALERTMANAGER_CONFIG` | atrocore-docker | Low |
 
 A CAA's technical lead can scope their own adaptation project from this table alone, without reading all six repos first.
 
