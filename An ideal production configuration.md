@@ -395,21 +395,74 @@ already terminates the SPA and proxies both `/api/` and `/nodered/`. It currentl
 > **RPO.** WAL archiving is configured on all three databases with
 > `archive_timeout=300`, which forces a segment switch every five minutes even on an idle
 > database — so the exposure window is five minutes, not the nightly backup interval. Point-in-time
-> recovery was proven end to end on a throwaway instance: a base backup, then rows committed before
-> and after a chosen timestamp, then recovery to that timestamp. PostgreSQL logged
-> `recovery stopping before commit of transaction 734` and `archive recovery complete`, and the
-> recovered database held the "before" rows and **not** the "after" ones. The 15-minute figure is
-> therefore conservative rather than aspirational. What has *not* been done is a PITR drill against
-> this platform's own stack — the mechanism is proven, the runbook for it is not.
+> recovery is now proven **against this platform's own stack**, not only on a throwaway instance:
+> `atrocore-docker/scripts/verify-pitr.sh` takes a base backup, commits a row, takes a target time,
+> commits a second row, forces a WAL switch, and recovers to the target — asserting the **second
+> row is absent**. Against the live AtroCore database on 2026-09-29, using a base backup from a
+> real stored set: 3 WAL segments replayed from the archive, `recovery stopping before commit of
+> transaction 46471, time 2026-09-29 17:37:29.800322+00`, the first row present, the second absent,
+> and the live database untouched. `scripts/restore-pitr.sh` is the operator tool and runbook §7.12
+> the procedure. The 15-minute figure is therefore conservative rather than aspirational.
 >
-> **RTO.** Still a target. The `restore:verify` drill has run — three schemas dropped to zero
-> tables and the content store wiped to zero files, both asserted, then restored from a
-> checksum-verified set with every metric matching (155/70/9 tables, 299 content files, the demo
-> row) and the gateway smoke matrix at 15/15 afterwards. That establishes a backup **restores a
-> working system**. It does not time one: the drill runs against the demo dataset, not
-> production-sized data. The 1.0 draft's 2-hour RTO assumed a warm standby to promote; on a single host with
-> restore-from-backup, 4 hours is the honest number until a drill proves otherwise. Do not quote
-> either figure to a stakeholder as a commitment before the drill has run.
+> **That drill's first run found the RPO path was broken for AtroCore.** `backup-platform.sh`
+> passed the application role to `pg_basebackup`, which needs REPLICATION, so AtroCore's base
+> backup had **never once been produced** — and because the failure only warned, every set still
+> reported itself complete. WAL was being archived faithfully onto a base that did not exist. Fixed,
+> and a failed base backup now fails the run rather than warning; the MANIFEST states per dataset
+> whether that set can recover to a point in time. Until 2026-09-29 the RPO claim above was true of
+> two databases out of three, and nothing in the system said so.
+>
+> **Drilling the other two datasets found two more defects, both fatal to a real recovery**
+> (2026-09-29). The AtroCore drill had been green throughout, and told us less than it appeared
+> to: AtroCore is the one database whose PostgreSQL settings are all defaults. `--dataset alfresco`
+> aborted on startup with `recovery aborted because of insufficient parameter settings —
+> max_connections = 100 is a lower setting than on the primary server, where its value was 300`;
+> a recovering server refuses to start when the shared-memory sizing parameters are below the
+> primary's, and Alfresco sets `max_connections=300` on its compose `command:` line, which no base
+> backup contains. `restore-pitr.sh` now reads those values from the backup's own `pg_control`
+> with `pg_controldata` — from the backup, not the live server, because the tool has to work with
+> the source host gone. Separately, both scripts queried the recovered instance as `postgres`,
+> which is correct only for AtroCore: a physical backup carries the source cluster's roles, and
+> neither Alfresco's (`alfresco`) nor compliance_web's (`compliance`) cluster has a `postgres`
+> role at all. Behind the scripts' own `2>/dev/null` this read empty rather than erroring, so a
+> successful recovery timed out after 240s and every assertion would have reported a working
+> recovery as a missing table. **All three datasets now pass 13/13** — AtroCore (PG 15), Alfresco
+> (PG 16.5, stopping before transaction 1814838) and compliance_web (PG 16, stopping before
+> transaction 915), each with 3 segments replayed, the first row present, the second absent, and
+> the live database untouched.
+>
+> **RTO. Measured 2026-09-29: 1m40s on this dataset**, by
+> `atrocore-docker/scripts/measure-rto.sh`. The 1.0 draft's 2-hour figure assumed a warm standby
+> this architecture does not have, and nothing had ever timed a recovery.
+>
+> **The clock deliberately stops later than the restore does.** `restore:verify` proved a backup
+> **restores a working system** — three schemas dropped to zero tables, the content store wiped
+> to zero files, both asserted, then restored with every metric matching and the gateway smoke
+> matrix at 15/15. But it stops there, and it *tolerates a partially failing smoke matrix as
+> "expected while Solr reindexes"*. Solr is derived state and deliberately not backed up, so on a
+> blank host it does not exist — and the reads that depend on it are the checklist endpoint, open
+> findings and four report Web Scripts. A recovery that has restored every byte and cannot answer
+> *which findings are open* has not recovered. So the measurement removes Solr's index before
+> restoring and runs the clock until the index is rebuilt and the smoke matrix passes.
+>
+> Two runs, 1m50s and 1m40s, restoring a 690 MB set (1,242 indexed nodes, 6,317 content files).
+> Breakdown of the second: teardown 12.3s, verify 1.8s, content store 7.6s (104 MB/s), databases
+> 8.5s, Alfresco ready 40.4s, **search correct again 23.1s**, smoke 6.8s. Afterwards
+> `H-ZZZZA0001-ATS-001` was findable **by search** in its exact state, `Pending Closure Approval`,
+> which proves the rebuilt index rather than only the database.
+>
+> **At this scale the platform is dominated by fixed cost**: 59.8s of the 100s is teardown, JVM
+> startup and the smoke matrix and does not grow with data. Everything that scales is 41s, 23s of
+> it indexing. Scaling only the size-dependent terms, **250,000 nodes and 200 GB of content
+> projects to about 2.6 hours, ~78 minutes of it reindexing** — arithmetic on one measurement, not
+> a second measurement, and it reads **low**: Solr indexes during Alfresco's boot at this size, so
+> work that is currently charged to the fixed term will not be once indexing outlasts startup (the
+> wall-clock rate is 18.7 ms/node against Solr's own 9.9 ms/node mean).
+>
+> **So: quote 4 hours.** The measurement and the projection both sit inside it, it retains margin
+> for the three caveats above and for fetching a set from offsite, and it is now a number with
+> evidence under it rather than an inheritance from a design document. What remains unmeasured is
+> production-sized data, and no arithmetic substitutes for that.
 
 ### 5.3 Backup Coverage
 
@@ -716,11 +769,33 @@ on the MANIFEST parser below.
 
 **Still open in this tier:**
 
-- **A PITR drill against this platform's own stack.** Restoring a *set* is now proven end to end.
-  Replaying WAL onto a base backup to reach a chosen point in time is still only proven on a
-  throwaway instance, and the platform-specific runbook for it is not written.
-- **RTO has not been timed.** The restore above completed without incident but was not measured,
-  and it was a ~681 MB set rather than production-sized data. The §5.2 figure stays a target.
+- ~~A PITR drill against this platform's own stack.~~ **Done (2026-09-29), all three databases**
+  — see §5.2. `scripts/verify-pitr.sh` (13 checks) and `scripts/restore-pitr.sh`, with runbook
+  §7.12 as the procedure. `pitr:verify` in CI covers **atrocore only**, because the other two
+  databases live in sibling repos CI does not check out — and that is the dataset whose settings
+  are all defaults, so a green pipeline is not evidence about the other two. Drill those by hand
+  against a full local stack.
+- ~~The WAL archive is never pruned, and the disk is the failure mode.~~ **Done (2026-09-29).**
+  Measured ~2.5 days after archiving was switched on: 5.5 GB / 350 segments for Alfresco, 1.2 GB
+  / 85 for AtroCore, 529 MB / 37 for compliance_web — about **3 GB/day, growing without bound**,
+  on a host that had reached 99%. This met the hazard below from the other direction: the archive
+  does not need a *failing* `archive_command` to fill the volume, it only needs time.
+  `atrocore-docker/scripts/prune-wal-archive.sh` now cuts the archive at the START WAL of the
+  **oldest retained base backup**, read out of that backup's own `backup_label`, and
+  `backup-platform.sh` calls it after set retention — so WAL retention follows set retention
+  instead of a blind age cutoff. With no base backup to anchor to it refuses and exits non-zero
+  rather than freeing the disk. `ship-wal-archive.sh --prune-local` previously enforced only
+  "shipped and older than N days", with the anchor rule written in a comment for the operator to
+  honour; both paths now share `wal-anchor.lib.sh`. First run: 492 segments removed, the disk
+  from 99% to 87%, and all three PITR drills re-run afterwards against that set's stored base
+  backups at 13/13 each. Conformance test `verify-wal-pruning.sh`, 18 checks,
+  `validate:wal-retention` as a merge gate.
+- ~~RTO has not been timed.~~ **Timed (2026-09-29)** — see §5.2. 1m40s to a searching, serving
+  system, with the fixed/size-dependent split measured and a projection to 250,000 nodes.
+  `scripts/measure-rto.sh`; every restore now records its phase timings and `restore:verify`
+  publishes them as an artifact. **Still not measured on production-sized data**, which is the
+  part no arithmetic replaces — the projection is explicitly labelled as arithmetic on one
+  measurement.
 - **Client-side encryption is not implemented.** Required before trusting a third-party
   destination, and it carries a key-escrow decision: an encrypted backup with a lost key is not
   a backup.
