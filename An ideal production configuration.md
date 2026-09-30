@@ -803,11 +803,27 @@ on the MANIFEST parser below.
 - **Client-side encryption is not implemented.** Required before trusting a third-party
   destination, and it carries a key-escrow decision: an encrypted backup with a lost key is not
   a backup.
-- **`restore:verify` still has no schedule**, and it does not route through an offsite
-  destination by default. Its absence is exactly why the MANIFEST parser defect survived
-  undetected. (It does now destroy Solr's index and *assert* the smoke matrix passes rather than
-  tolerating a partial failure — verified end to end on 2026-09-30, index rebuilt to 1,242 nodes
-  from a low-water mark of 0.)
+- ~~`restore:verify` has no schedule, and does not route through an offsite destination.~~ **Both
+  were already true and this bullet was stale.** A weekly schedule exists (Sundays 03:00 UTC, on
+  `develop`), and the job has routed through an offsite destination since that work landed —
+  `BACKUP_DESTINATION=local` to a scratch path, so the set is pushed, pulled back into a different
+  directory, the local copy deleted, and the restore consumes only what came back.
+
+  **What was actually wrong is worse, and only visible from the schedule's first run.** Nothing
+  had ever run through it. Checked 2026-09-30: `restore:verify` had 51 manual invocations and
+  **zero executions**; `pitr:verify` 15 and **zero**. Every proof that restore and PITR work —
+  including the RTO measurement in §5.2 — came from running them by hand. Playing the schedule
+  deliberately, rather than letting its first unattended run be a Sunday at 03:00, found three
+  CI-only defects that no local run can reach: the WAL archive directory is root-owned under
+  docker-in-docker so every `archive_command` failed; `restore:verify` resolved Solr at
+  `localhost` where the runner publishes on the dind alias; and `observability:verify` could not
+  reach the mail sink it had just started, so it passed as *detection only*. All three fixed. It
+  also found `restore:verify` comparing two unreadable table counts and calling it a match.
+
+  **Still open:** `demo:verify` fails on the shared runner (25 historical failures, last success
+  2026-09-27) for a reason not yet diagnosed — the quickstart reaches step 5, processes the
+  follow-up successfully, and the script exits without a message. Until that is understood the
+  weekly schedule will report red even with the other three green.
 
 > **The hazard this configuration introduces.** With `archive_mode=on`, a failing `archive_command`
 > does not cause PostgreSQL to discard WAL — it retains every segment until archiving succeeds, and
@@ -988,7 +1004,7 @@ push, because most of them are things an adopter meets in the first hour.
 | `Pending Closure Review` vs `Pending Closure Approval` drift | `compliance_checklist` schema vs. the server; the server is authoritative |
 | Closure walkthrough unverified in the UI | Add an e2e case |
 | Dead `fodt to odt` Share rule on provisioned instances | Document or delete |
-| `demo:verify` has no schedule | Schedule it nightly |
+| `demo:verify` has no schedule | ~~Schedule it nightly~~ — a weekly schedule exists; `demo:verify` itself fails on the shared runner and is the reason it reports red |
 
 **Explicitly out of scope:** the follow-up evidence-review redesign and the
 `vso:closureRejectionReason` erasure question. Both are product decisions, not P3 work.
