@@ -207,6 +207,9 @@ not plan an adaptation around it without scoping that work first. What the
 decision buys you today is a guarantee about the seam: whatever an IdP is
 eventually wired to, Alfresco stays the group store and the only thing that
 enforces document permissions, so the adaptation below does not become obsolete.
+`scripts/verify-adaptation-guide.sh` asserts this claim against the tree, not just
+against this paragraph: whoever builds the IdP shape will fail that check until
+they come back and rewrite this section.
 
 **What you actually adapt: the group names.** Roles are not assigned in the
 application. They come from Alfresco group membership, translated by the

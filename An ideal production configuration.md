@@ -1023,7 +1023,9 @@ infrastructure an adopter happens to own does not reach into the platform's code
 | Extra services to run | none | the authority's own |
 
 Only the first column exists as running code today, and it stays the default after any IdP work
-lands. What follows answers the three questions the spike was asked.
+lands. `scripts/verify-production-doc.sh` asserts that against the tree rather than taking this
+sentence's word for it, so the first person to build the IdP shape is made to come back and
+correct this table. What follows answers the three questions the spike was asked.
 
 **1. Role source of truth: Alfresco groups — the same answer in both shapes.** Alfresco holds 14
 `U-VSO-*` groups, of which `alfresco_group_role_map` maps 7; unknown groups grant no roles, which is
