@@ -438,12 +438,16 @@ already terminates the SPA and proxies both `/api/` and `/nodered/`. It currentl
 > **The clock deliberately stops later than the restore does.** `restore:verify` proved a backup
 > **restores a working system** — three schemas dropped to zero tables, the content store wiped
 > to zero files, both asserted, then restored with every metric matching and the gateway smoke
-> matrix at 15/15. But it stops there, and it *tolerates a partially failing smoke matrix as
-> "expected while Solr reindexes"*. Solr is derived state and deliberately not backed up, so on a
-> blank host it does not exist — and the reads that depend on it are the checklist endpoint, open
-> findings and four report Web Scripts. A recovery that has restored every byte and cannot answer
-> *which findings are open* has not recovered. So the measurement removes Solr's index before
-> restoring and runs the clock until the index is rebuilt and the smoke matrix passes.
+> matrix at 15/15. But it stops there, and until 2026-09-30 it *tolerated a partially failing
+> smoke matrix as "expected while Solr reindexes"* — it left the existing index in place, so it
+> could not tell an index still catching up from one that never would. Solr is derived state and
+> deliberately not backed up, so on a blank host it does not exist — and the reads that depend on
+> it are the checklist endpoint, open findings and four report Web Scripts. A recovery that has
+> restored every byte and cannot answer *which findings are open* has not recovered.
+>
+> Both now destroy the index first, share `scripts/solr-index.lib.sh` so they cannot drift on what
+> "search is back" means, and assert rather than tolerate: the drill requires the smoke matrix to
+> pass once the rebuild completes, and the measurement runs the clock until that point.
 >
 > Two runs, 1m50s and 1m40s, restoring a 690 MB set (1,242 indexed nodes, 6,317 content files).
 > Breakdown of the second: teardown 12.3s, verify 1.8s, content store 7.6s (104 MB/s), databases
@@ -800,7 +804,10 @@ on the MANIFEST parser below.
   destination, and it carries a key-escrow decision: an encrypted backup with a lost key is not
   a backup.
 - **`restore:verify` still has no schedule**, and it does not route through an offsite
-  destination. Its absence is exactly why the MANIFEST parser defect survived undetected.
+  destination by default. Its absence is exactly why the MANIFEST parser defect survived
+  undetected. (It does now destroy Solr's index and *assert* the smoke matrix passes rather than
+  tolerating a partial failure — verified end to end on 2026-09-30, index rebuilt to 1,242 nodes
+  from a low-water mark of 0.)
 
 > **The hazard this configuration introduces.** With `archive_mode=on`, a failing `archive_command`
 > does not cause PostgreSQL to discard WAL — it retains every segment until archiving succeeds, and
