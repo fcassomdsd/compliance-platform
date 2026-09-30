@@ -4,12 +4,15 @@
 **Audience**: Technical stakeholders, operations team, project sponsors
 **Last substantive revision**: 2026-09-26 (re-planned against the current tree; supersedes the 2026-07-30 1.0-draft)
 
-**Status**: **Partially implemented — P3.0 through P3.3 and P3.5 are done, P3.4 mostly; P3.6–P3.7 are not started.**
+**Status**: **Partially implemented — P3.0 through P3.3, P3.5 and P3.7 are done, P3.4 mostly; P3.6 is not started.**
 Landed so far: secrets resolve from files with production refusing published values, a profile-aware
 credential preflight, digest-pinned images everywhere, hash-pinned Python dependencies, Trivy
-scanning and SBOM generation in all six pipelines, container hardening, and a TLS edge with
-per-interface port binding. **Still absent**: Vault,
-Keycloak, PostgreSQL replication, Prometheus/Grafana/Loki, ClamAV, backup automation and image
+scanning and SBOM generation in all six pipelines, container hardening, a TLS edge with
+per-interface port binding, a Prometheus/Grafana/Loki stack with a drill that proves an alert
+reaches a recipient, and backup/restore proven by a measured recovery. P3.7 closed as a written
+decision rather than code: identity is a configurable seam with Alfresco-backed auth as the
+permanent default and an external IdP as an option (§6.9, ADR-002). **Still absent**: Vault,
+any OIDC integration, PostgreSQL replication, ClamAV, scheduled backup automation and image
 signing. The running systems are single-host Docker Compose setups per repo plus the
 `atrocore-docker` demo stack described in the root `CLAUDE.md`. This document is the **P3** milestone
 plan; each tier in §6 records its own status. If you are adapting this platform for a different civil aviation authority before thinking
@@ -44,7 +47,7 @@ technical precondition any future multi-host split has to solve first.
 | Topology | Single host, Docker Compose + systemd | The platform's three shared Docker networks are single-host bridge networks created by three different repositories. Multi-host requires solving cross-host service discovery first (ADR-005). |
 | Orchestrator | Docker Compose + systemd | Sufficient at < 5 concurrent users. K3s/Kubernetes deferred until scale demands it (ADR-001). |
 | Hardware floor | 16 GB RAM / 8 vCPU | Measured, not estimated. See §3 and `FOOTPRINT_AUDIT.md`. |
-| Identity provider | **Deferred.** Alfresco-backed auth for production v1 | Keycloak is not a login swap — application roles do not grant Alfresco repository permissions. Design spike first (ADR-002, revised). |
+| Identity provider | **Configurable seam, two shapes.** Alfresco-backed auth is the default; an external IdP is optional | The platform serves any authority, and many run no IdP. Alfresco stays the group store and the ACL authority in both shapes; only who authenticates and what triggers provisioning differ (§6.9, ADR-002 revised). |
 | Secrets | File-based secret precedence first, Vault second | `compliance_import` already resolves `*_FILE` → Docker secret → env. Generalising that seam makes Vault a drop-in with no application change. |
 | Database HA | **Deferred** with the multi-host decision | Streaming replication to a standby is incoherent on a single host. Backup + verified restore carries the reliability burden instead. |
 | TLS termination | `compliance_web`'s existing nginx | It already fronts the SPA and proxies `/api/` and `/nodered/`. Adding TLS there beats introducing a fourth proxy. |
@@ -1002,19 +1005,72 @@ For a binary handed to inspectors in the field, that is a production gap.
   `uploadHost`, `alfrescoHost`), all of which default to `localhost`. The packaged build reads a
   writable copy under `userData`, which is the natural seam.
 
-### 6.9 P3.7 — Identity: spike only
+### 6.9 P3.7 — Identity: decided — **DONE (2026-09-30)**
 *Gate: a written decision, not an implementation.*
 
-Production v1 ships on Alfresco-backed auth. Produce a design spike that answers three questions
-before any migration work is scheduled:
+**The decision: identity is a configurable seam with two supported shapes, not a migration to
+Keycloak.** This platform is offered to any civil aviation authority, and an authority that runs no
+identity provider is not a lesser case waiting to be upgraded — it is the default. The same
+reasoning already governs the backup destination (§6.6) and the alert destination (§6.7): the
+infrastructure an adopter happens to own does not reach into the platform's code.
 
-1. What is the role source of truth — Alfresco groups, Keycloak groups, or the mapping table?
-2. How does an OIDC identity receive its **Alfresco repository grants**? This is the hard part; see
-   §4.1. An OIDC login does not provision repository access.
-3. What replaces `compliance_checklist`'s sync-time Alfresco password prompt? Alfresco tickets are
-   short-lived and there is no refresh token — this is the concrete driver for the migration.
+| | No external IdP (**default**) | Existing IdP (**configured**) |
+|---|---|---|
+| Who authenticates | Alfresco | The IdP |
+| Who holds groups | Alfresco | Alfresco |
+| Who enforces repository ACLs | Alfresco | Alfresco |
+| Field app at sync time | Alfresco password prompt | Device-code flow |
+| Extra services to run | none | the authority's own |
 
-Then revisit **ADR-002**.
+Only the first column exists as running code today, and it stays the default after any IdP work
+lands. What follows answers the three questions the spike was asked.
+
+**1. Role source of truth: Alfresco groups — the same answer in both shapes.** Alfresco holds 14
+`U-VSO-*` groups, of which `alfresco_group_role_map` maps 7; unknown groups grant no roles, which is
+what makes the mapping table a filter rather than a second authority. An IdP that also carried role
+claims would create two group stores to keep in step, and the one that loses the race is the one
+that grants a permission nobody intended. An IdP is an identity provider here, never the
+authorization authority. Keycloak-as-role-truth stays available as an opt-in third configuration,
+not as the destination.
+
+**2. Repository grants: one scripted provisioning path — the same mechanism in both shapes, with a
+different trigger.** There are two enforcement points, not one: `compliance_web` checks the
+application role, and Alfresco independently enforces the repository ACL against the session's own
+`alf_ticket`. An account with a mapped role and no repository grant logs in, passes every
+application check, and takes a 403 from Alfresco on its first write. The grant itself is two calls —
+group membership through the legacy `/alfresco/service/api/sites/{site}/memberships` webscript (the
+v1 site-members endpoint 404s for a group id), and the folder ACL through `PUT /nodes/{id}` with a
+`permissions` body (there is no `/nodes/{id}/permissions` endpoint). `seed-demo-identities.sh`
+already does exactly this, group-level and in the narrow `SiteConsumer` + folder `Contributor`
+shape, having been corrected from per-user `SiteCollaborator` grants in §6.5. What it is not is
+general: it is hardcoded to the two demo groups and the demo site. Generalised into a script taking
+a group and a role, an administrator runs it as an onboarding step where there is no IdP, and an
+event listener runs it ahead of first use where there is one. Just-in-time creation at first login is rejected: a user's
+very first action races the grant.
+
+**3. Field app at sync time: keep the Alfresco password prompt as the default; add device-code as a
+configured alternative.** The generalisable piece is the *contract*, not the prompt — whatever the
+inspector does, the app ends up holding a short-lived Alfresco ticket it sends as
+`X-Alfresco-Ticket` and persists nowhere. `compliance_import` does not care how that ticket was
+obtained. A device-code flow satisfies the same contract for an authority with an IdP, and needs a
+browser reachable at sync time, which an offline-first field app cannot assume.
+
+**Rejected in both shapes**: an IdP as the ACL authority; IdP role claims consumed directly
+alongside separately managed Alfresco groups; service-account writes carrying a client-claimed
+identity.
+
+**What a follow-up builds first — not the login.** The provisioning path from question 2, because it
+is the one piece needed in *both* shapes: an authority with no IdP still has to grant each of its
+own groups `SiteConsumer` plus folder `Contributor`, and the only thing that does that today is a
+demo seeder with two group names baked into it. Lifting that mechanism into a general provisioning
+script is useful immediately, and it is what makes any later IdP configuration safe rather than a
+second way to get authorization wrong.
+Require of it a test that a newly provisioned user can **create** in `Hallazgos`, not merely read
+it — the read-only case passes while the writing case fails, which is exactly how this was missed
+before. Identity then becomes an entry in `COUNTRY_ADAPTATION_GUIDE.md` (§9), alongside the alert
+destination added 2026-09-30.
+
+**ADR-002** is revised below to record this.
 
 ### 6.10 Parallel track — open correctness items
 
@@ -1136,18 +1192,28 @@ hand-run step that leaves nothing behind** — otherwise it will not survive the
 provides auto-restart equivalent to pod restart. A K3s path exists if scale changes.
 **Consequences**: No auto-scaling (not needed); manual rolling updates (acceptable).
 
-### ADR-002: Keycloak for OIDC — **revised 2026-09-26**
-**Status**: **Deferred** (was: Accepted) · **Date**: 2026-07-30, revised 2026-09-26
-**Context**: The original decision treated identity as a login mechanism. It is not. `compliance_web`
-derives roles from Alfresco group membership, and an application role does not grant an Alfresco
-repository permission — every writing role needs repository access provisioned separately.
-**Decision**: Production v1 ships on Alfresco-backed authentication. Keycloak is reduced to a design
-spike (§6.9) that must answer the role-source and repository-grant questions before any migration is
-scheduled.
-**Rationale**: Migrating identity without solving the dual authorization plane would produce a system
-where users can log in and cannot write. The concrete driver for eventually doing this work is
-`compliance_checklist`'s sync-time password prompt, not the login flow itself.
-**Consequences**: No OIDC at go-live. The existing, tested auth path carries production.
+### ADR-002: Identity as a configurable seam — **revised 2026-09-30**
+**Status**: **Accepted** (was: Deferred; originally: Accepted as "Keycloak for OIDC") · **Date**:
+2026-07-30, revised 2026-09-26, decided 2026-09-30
+**Context**: The original decision treated identity as a login mechanism and assumed every
+deployment would move to Keycloak. Neither holds. `compliance_web` derives roles from Alfresco group
+membership, and an application role does not grant an Alfresco repository permission — every writing
+role needs repository access provisioned separately. Separately, this platform is offered to any
+civil aviation authority, and many run no identity provider at all; for them a Keycloak requirement
+is a new service to operate in exchange for nothing they asked for.
+**Decision**: Identity is a **configurable seam with two supported shapes**. Alfresco-backed
+authentication is the zero-dependency default and stays first-class permanently. An external OIDC
+provider is an optional configuration behind that seam. In **both** shapes Alfresco remains the
+group store and the sole enforcement point for repository ACLs; the IdP, where one exists, provides
+identity only. The three answers are recorded in §6.9.
+**Rationale**: Migrating identity without solving the dual authorization plane would produce a
+system where users can log in and cannot write. Making the IdP the destination rather than an option
+would exclude the adopters least able to absorb another service. Treating identity like the backup
+and alert destinations — an adopter-supplied piece behind a documented seam — is the pattern this
+platform already uses for infrastructure it does not own.
+**Consequences**: No OIDC at go-live, and none required ever. The existing, tested auth path carries
+production. The first increment is the group-level provisioning path (§6.9), which is needed in both
+shapes, not a login change. `COUNTRY_ADAPTATION_GUIDE.md` §9 carries the adopter-facing version.
 
 ### ADR-003: Backup-and-restore over streaming replication — **revised 2026-09-26**
 **Status**: **Revised** · **Date**: 2026-07-30, revised 2026-09-26
