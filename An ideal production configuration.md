@@ -829,8 +829,9 @@ on the MANIFEST parser below.
 
 **The gate is met, and the drill that proves the third clause is a tracked artifact.**
 `atrocore-docker/scripts/verify-observability.sh` stops a container on purpose, waits for the alert
-to reach `firing`, confirms Alertmanager received it, restarts the container and waits for the
-alert to clear — failing if any step does not happen. It refuses to start unless the probe is
+to reach `firing`, confirms Alertmanager received it, **confirms the notification was actually
+delivered**, restarts the container, waits for the alert to clear and confirms the recovery notice
+arrived too — failing if any step does not happen. It refuses to start unless the probe is
 already passing, so a "firing" alert afterwards cannot be one that was already there. It runs as
 `observability:verify` in both pipelines, manual/scheduled like `demo:verify`.
 
@@ -901,10 +902,26 @@ logs stayed on one host:
 
 **Still open in this tier:**
 
-- **Alert delivery is not configured.** Alertmanager ships with a receiver that notifies nobody;
-  alerts are received, grouped, inhibited and visible, which is what the drill asserts. Email is a
-  documented uncommenting step, deliberately not pre-filled because Alertmanager does not expand
-  environment variables in its config and a credential in a tracked file is a published credential.
+- ~~Alert delivery is not configured.~~ **Delivered and asserted (2026-09-30).** All 22 rules had
+  routed to a receiver with no notifier: Alertmanager recorded, grouped and inhibited them, the
+  drill confirmed they arrived, and nothing was ever sent to a person. Detection — the harder half —
+  worked; the half that makes it useful was missing, and the drill could not see it because it only
+  asked whether Alertmanager held the alert. It stopped there because delivery cannot be asserted
+  without a mail server, so there is one: a **MailPit** sink (`obs-mailpit`, ~30 MB, in-memory,
+  loopback-only) whose JSON API turns "was it sent" into an assertion. `verify-observability.sh`
+  now asserts both the firing notification and the recovery notice, proven end to end on a stopped
+  container.
+
+  `ALERTMANAGER_CONFIG` selects the config file — compose expands the volume path even though
+  Alertmanager cannot expand variables in the file itself — and defaults to delivery, because the
+  alternative default is the state above, where the first person to learn that alerts go nowhere
+  learns it during an incident. **`preflight-secrets.sh --production` fails** if the demo config is
+  still selected, if it does not exist, or if the selected file configures no notifier at all.
+
+  **Production still needs a real smarthost.** MailPit lives in the same compose project as the
+  platform it watches and dies with the host it would be reporting on. What is closed here is that
+  delivery is now configured, exercised and enforced by default rather than being a documented
+  step someone was expected to remember.
 - **The monitoring stack is not itself monitored**, and nothing watches whether Prometheus is up.
 - **Loki retention is 31 days** and nothing ships logs offsite.
 - **The observability stack costs ~1 GiB**, which on the 8 GB floor in §3 is what pushes a host over.
