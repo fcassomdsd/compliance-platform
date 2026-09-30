@@ -556,7 +556,7 @@ this is done. This is not automatic — three tiers break it unless designed not
 | **6.7** Field app | The packaged app defaults every host to `localhost`, which is what makes the one-machine demo work. | Signing and auto-update are additive; `localhost` stays the default in `app.config.json`. |
 
 Tiers that **improve** the demo: 6.6 replaces the quickstart's `/specialties` health stand-in with a
-real endpoint, and the parallel track (§6.9) scripts the last manual Share step and fixes the
+real endpoint, and the parallel track (§6.11) scripts the last manual Share step and fixes the
 closure-status naming drift.
 
 **Exit criterion for P3 as a whole:** `demo:verify` green **and** a production-profile deployment
@@ -1072,7 +1072,61 @@ destination added 2026-09-30.
 
 **ADR-002** is revised below to record this.
 
-### 6.10 Parallel track — open correctness items
+### 6.10 Identity — the work the decision implies
+
+*Not a tier. P3.7's gate was a written decision and that gate is met; this is the
+backlog that decision creates, recorded here so it is not rediscovered.*
+
+The split that matters is whether a piece of work is needed **in both shapes** or
+only if an authority wants an external IdP. The first group is not optional
+future work — it is gaps in the shape that ships today.
+
+**First increment, ahead of everything below**: generalise
+`compliance_cmis/scripts/seed-demo-identities.sh` into a provisioning script
+taking a group and a role. It already grants correctly and group-level
+(`SiteConsumer` plus folder `Contributor`, corrected from per-user
+`SiteCollaborator` in §6.5); what it is not is general, since the two demo group
+names are baked in. Its acceptance test is that a newly provisioned user can
+**create** in `Hallazgos`, not merely read it.
+
+#### Needed in both shapes
+
+| # | Work | Why it is needed |
+|---|---|---|
+| A1 | A supported way to edit `alfresco_group_role_map` | SQL-only today; the only writes are `compliance_web/migrations/0002` and `0003`. `COUNTRY_ADAPTATION_GUIDE.md` §9 tells an adopter to add a row per group, which currently means hand-SQL against production or writing their own migration. Wants a script in the `import-data-pack.py` mould: group→role pairs in, validated against `app_role` and against Alfresco, upserted. |
+| A2 | A "what will this user actually get?" diagnostic | Nothing answers it before the user logs in. Given a username, print Alfresco groups → mapped roles → repository grants. This is what turns the *application role is not an Alfresco permission* trap into a one-line check rather than a support ticket. Shares its logic with the first increment. |
+| A3 | A retirement path for a group | Migration `0003` deactivates `U-VSO-EL_EspecialistaLider` by hand. The `is_active` column exists and nothing but bespoke SQL ever sets it. |
+| A4 | Test the role-refresh grace behaviour, or drop the claim | `server/auth/sessionPolicy.cjs` refreshes roles every 15 minutes and the auth docs promise a cached-role grace period on IdP outage. With Alfresco *as* the IdP, that outage is also when every downstream call fails. Either assert what it does or stop claiming it. |
+
+#### Only for the IdP option — none of it built
+
+| # | Work | Why it is needed |
+|---|---|---|
+| **B1** | **Where the Alfresco ticket comes from** | The largest item, and **not one of the three questions the spike answered**. `req.auth.ticket` is threaded into every downstream call — six call sites in `server/findings/router.cjs` alone, plus `server/usoap/router.cjs` and `server/jobs/findingOverdueJob.cjs`. An OIDC login yields no Alfresco ticket. Either Alfresco is configured to accept the IdP's token, or something mints a per-user ticket. Until this is answered there is no IdP shape, and it is separate from the provisioning path. |
+| B2 | A provider seam in `compliance_web/server/auth/` | Login is `alfrescoClient.createTicket(username, password)` called directly at `server/auth/router.cjs:169`. `AUTH_CONFIG` is 42 lines of env-driven settings with no provider key. Needs an interface with two implementations, selected by configuration. |
+| B3 | Group lookup once the IdP authenticates | The decision keeps Alfresco as the group store, but `getUserGroups({username, ticket})` needs a ticket. Circular with B1; it does not get solved separately. |
+| B4 | Device-code flow in the field app | `compliance_checklist/electron/ipc/ipcHandles.js:443` `authenticateOperator` is a username/password POST. Device-code needs a browser and polling, and the app is offline-first, so it has to degrade when neither is available. `compliance_import`'s `X-Alfresco-Ticket` verification is unchanged — which is the contract in §6.9 working as intended. |
+| B5 | Session semantics against an external IdP | Single logout, absolute timeout versus the IdP's own session lifetime, and mid-session revocation. The 15-minute role refresh covers an Alfresco group change; an IdP disabling an account is a different event. |
+
+#### Keeping the decision from rotting
+
+- **C1** — extend `scripts/verify-adaptation-guide.sh` to assert §9's IdP column still reads *not built*, so the guide cannot quietly begin promising it.
+- **C2** — the same for §6.9's claim that only the first column exists as running code. `scripts/verify-production-doc.sh` does not cover it.
+- **C3** — a conformance test for the two-shape claim itself: that the default path needs no IdP configuration at all, and that a configured provider does not move the ACL enforcement point.
+
+#### One flag, before any of B is scheduled
+
+**B1 could reopen ADR-002.** If minting a per-user Alfresco ticket from an OIDC
+identity turns out to be impractical, the only workable IdP shape may be
+Alfresco's own identity-service integration — a **deployment** configuration
+rather than application code, which would change what "configured" means in
+§6.9's table. Spike B1 before committing to B2–B5, because it determines whether
+they are the right work at all.
+
+**Ordering**: A1 and A2 alongside the first increment, since they share its
+logic; then A3 and A4; then B1 as a spike before anything else in B.
+
+### 6.11 Parallel track — open correctness items
 
 Tracked in `internal/TECHNICAL_DEBT_ANALYSIS.md` §4.8. Not infrastructure, but in scope for the same
 push, because most of them are things an adopter meets in the first hour.
@@ -1212,8 +1266,9 @@ would exclude the adopters least able to absorb another service. Treating identi
 and alert destinations — an adopter-supplied piece behind a documented seam — is the pattern this
 platform already uses for infrastructure it does not own.
 **Consequences**: No OIDC at go-live, and none required ever. The existing, tested auth path carries
-production. The first increment is the group-level provisioning path (§6.9), which is needed in both
-shapes, not a login change. `COUNTRY_ADAPTATION_GUIDE.md` §9 carries the adopter-facing version.
+production. The first increment is the group-level provisioning path, which is needed in both
+shapes, not a login change; §6.10 records the rest of the work the decision implies, including
+one item (B1) that could reopen this ADR. `COUNTRY_ADAPTATION_GUIDE.md` §9 carries the adopter-facing version.
 
 ### ADR-003: Backup-and-restore over streaming replication — **revised 2026-09-26**
 **Status**: **Revised** · **Date**: 2026-07-30, revised 2026-09-26
