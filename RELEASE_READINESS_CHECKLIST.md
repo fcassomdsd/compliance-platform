@@ -96,8 +96,8 @@ every workstream's full writeup.
   cleanup job) and its four duplicated AFTS-escape copies. The remaining items ship as
   documented known limitations, not blockers — most consequentially, **P3
   production-hardening was at 0%** (no Vault, Keycloak, observability, or replication) when
-  this was written; tiers P3.0–P3.5 have since landed, leaving Vault, Keycloak and replication
-  open. Both the adopter doc and the production-configuration doc's own banner carry the
+  this was written; tiers P3.0–P3.5 and P3.7 have since landed, leaving Vault, OIDC
+  integration and replication open. Both the adopter doc and the production-configuration doc's own banner carry the
   current status. Detail: `internal/TECHNICAL_DEBT_ANALYSIS.md`.
 - [x] **(W7) Adopter onboarding is installable, not hand-entered.** A fresh deployment used to
   present 32 entities with no menu entry pointing at most of them (AtroCore loads layout
@@ -160,8 +160,10 @@ every workstream's full writeup.
   the `dev` profile on 3000.
 
   Decisions taken: **single host** (ADR-005, multi-host deferred behind the bridge-network
-  constraint); **Keycloak deferred** to a design spike (ADR-002 revised — an application role does
-  not grant an Alfresco repository permission, so identity migration is not a login swap);
+  constraint); **identity as a configurable seam** (ADR-002, decided 2026-09-30 — an application
+  role does not grant an Alfresco repository permission, so this was never a login swap; Alfresco-backed
+  auth is the permanent default and an external IdP an option, because many authorities
+  run none);
   **backup-and-verified-restore instead of streaming replication** (ADR-003 revised); and the
   90-day calendar replaced by **evidence-gated tiers P3.0–P3.7**, each with a runnable exit gate and
   a CI job, since the work is done by one or two people with automation rather than a 2.5-FTE ops
@@ -171,7 +173,7 @@ every workstream's full writeup.
   per-tier regression gate, and the demo/production split is expressed as compose profiles, never by
   replacing the demo path.
 
-  **Status: P3.0 through P3.3 and P3.5 complete; P3.4 mostly complete; P3.6–P3.7 not started.** P3.1 (production secrets) landed as
+  **Status: P3.0 through P3.3, P3.5 and P3.7 complete; P3.4 mostly complete; P3.6 not started.** P3.1 (production secrets) landed as
   five merge requests. All three services now resolve secrets by the same precedence
   (`<NAME>_FILE` → `/run/secrets/<name>` → the environment variable), which is the seam a secret
   manager writes into, and each refuses at startup any value published in these repositories —
@@ -259,7 +261,7 @@ every workstream's full writeup.
   What shipped: `/health` on `compliance_flow` and `atrocore-docker` (the two that lacked one),
   compose healthchecks on the four services with none, a Prometheus/Alertmanager/Grafana/Loki
   stack under `atrocore-docker/observability/` as a **separate opt-in Compose project** so the
-  lean demo is untouched, 15 alert rules, one 17-panel dashboard, the six auth metrics
+  lean demo is untouched, 22 alert rules, one 17-panel dashboard, the six auth metrics
   `AUTH_CHUNK8_OPERATIONAL_READINESS.md` §6 has named since the auth subsystem shipped, and
   structured JSON logging in the two services that emitted free text.
 
@@ -283,11 +285,20 @@ every workstream's full writeup.
   credential was written to stdout verbatim. And `compliance_web` wrote session ids to stdout.
   Both are now redacted in the log formatter, where a call site cannot forget.
 
-  **Still open in this tier:** alert *delivery* is not configured (Alertmanager receives, groups
-  and displays; email is a documented uncommenting step, deliberately not pre-filled because a
-  credential in a tracked file is a published credential), the monitoring stack is not itself
-  monitored, Loki retention is 31 days with no offsite shipping, and the stack costs ~1 GiB —
-  which on the 8 GB floor is what pushes a host over, and is part of why it is opt-in.
+  **Alert delivery closed 2026-09-30.** It was open here because the drill stopped at
+  "Alertmanager holds the alert", which is not delivery — a receiver with no notifier configured
+  reaches exactly that state and looks identical. The default config now delivers to a MailPit
+  sink inside the Compose project, and `verify-observability.sh` asserts both the notification and
+  its recovery notice actually arrived, the latter against a deadline read from Alertmanager's own
+  `group_interval` rather than a guessed one. What still deliberately does not ship is a *real*
+  destination: that is the adopter's relay, domain and on-call arrangement, so
+  `alertmanager.yml` carries a webhook and an email block side by side for them to fill in, and
+  `preflight-secrets.sh --production` refuses a deployment that still points at the demo sink or
+  configures no notifier at all. See `COUNTRY_ADAPTATION_GUIDE.md` §8.
+
+  **Still open in this tier:** the monitoring stack is not itself monitored, Loki retention is
+  31 days with no offsite shipping, and the stack costs ~1 GiB — which on the 8 GB floor is what
+  pushes a host over, and is part of why it is opt-in.
 
   Worth recording for whoever plans the real deployment: **the field app currently sends the
   shared API key and the inspector's Alfresco password over plain HTTP** to `:1880`, `:8000` and
@@ -301,6 +312,33 @@ every workstream's full writeup.
   both imports, the finding at `Pending Closure Approval`, smoke 15/15, envelope 5/5, all four
   oversight artifacts filed.
 
+  **P3.7 (identity)** closed 2026-09-30 as what its gate asked for — a written decision, not an
+  implementation — and the decision is broader than the question that prompted it. Identity is a
+  **configurable seam with two supported shapes**, because this platform is offered to any civil
+  aviation authority and many run no identity provider at all; for those, requiring one is a new
+  service to operate in exchange for nothing they asked for. Alfresco-backed authentication is
+  therefore the permanent default, not a stepping stone, and an external OIDC provider is an
+  option behind the seam. In **both** shapes Alfresco stays the group store and the sole enforcer
+  of repository ACLs; the IdP, where one exists, provides identity only.
+
+  The three answers: role source of truth is **Alfresco groups** in both shapes, with
+  `alfresco_group_role_map` acting as a filter rather than a second authority (unknown groups
+  grant nothing); repository grants are **one scripted provisioning path** in both shapes, differing
+  only in what triggers it — an administrator at onboarding, or an IdP event; and the field app
+  **keeps its Alfresco password prompt** by default, with device-code as a configured alternative,
+  since what generalises is the contract (a short-lived ticket sent as `X-Alfresco-Ticket` and
+  persisted nowhere) rather than the prompt. Rejected in both shapes: an IdP as the ACL authority,
+  IdP role claims used alongside separately managed Alfresco groups, and service-account writes
+  carrying a client-claimed identity.
+
+  **The first increment is not the login.** It is generalising the provisioning path, which is
+  needed in both shapes: `seed-demo-identities.sh` already grants correctly and group-level
+  (`SiteConsumer` plus folder `Contributor`, corrected from per-user `SiteCollaborator` in P3.3),
+  but has the two demo group names baked in. Its test must be that a newly provisioned user can
+  **create** in `Hallazgos`, not merely read it — the read-only case passes while the writing case
+  fails, which is how the dual authorization plane was missed in the first place. Adopter-facing
+  version: `COUNTRY_ADAPTATION_GUIDE.md` §9. ADR-002 is revised accordingly.
+
 ## What's actually blocking a public release today
 
 One thing, requiring action from the project owner rather than more unilateral engineering
@@ -313,9 +351,9 @@ work:
    first.
 
 W8 (AtroCore decommissioning) is deliberately post-release and is not a gate. Neither is W9 (P3
-production hardening) — it is now planned and starting, but the platform publishes as a pre-1.0
+production hardening) — it is well under way, but the platform publishes as a pre-1.0
 reference implementation that states its hardening status plainly. The remaining
-known limitations — P3 production-hardening at 0%, the field app's hand-rolled ID regexes,
+known limitations — P3's own open tiers (P3.4's automation, P3.6), the field app's hand-rolled ID regexes,
 `compliance_import`'s partial write idempotency, the `compliance_flow` endpoints still without
 a `catch`, and the deferred follow-up evidence-review redesign — are catalogued in
 `internal/TECHNICAL_DEBT_ANALYSIS.md` and do not block publication.

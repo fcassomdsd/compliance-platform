@@ -69,6 +69,16 @@ this is almost always `docs:`, occasionally `fix:` (correcting something wrong) 
   months into specifying a wrong Alfresco image and a pre-built AtroCore image whose licensing
   problem had been deliberately engineered away; the script exists so that cannot recur silently.
   It needs no Docker daemon and no `.env` files.
+- **If you touched `COUNTRY_ADAPTATION_GUIDE.md`, run
+  `./scripts/verify-adaptation-guide.sh`** (same preconditions — tracked files only, no daemon).
+  It asserts that every file the guide tells an adopter to edit still exists, that §9's
+  group-to-role table matches what `compliance_web`'s migrations actually seed **in both
+  directions**, that §8's alert destination still ships unconfigured, that §1's ICAO row counts
+  match the seed SQL, and that every `§N` cross-reference and summary-table row still resolves.
+  Run it after any change in the component repos too, not only after editing the guide: the
+  failure this catches is a migration or a renamed file moving underneath a document nobody
+  thought to reopen. Its reader is an adopting authority's technical lead working on a tree they
+  have never seen, who cannot tell a stale path from their own mistake.
 
 ---
 

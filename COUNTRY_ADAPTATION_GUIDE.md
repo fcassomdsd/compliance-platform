@@ -4,7 +4,7 @@
 
 This platform is a **reference implementation**, not a generic multi-tenant product. It was built for one specific civil aviation authority — the Dominican Republic's IDAC (Instituto Dominicano de Aviación Civil) — and most of that authority's own branding, specialty taxonomy, CAP-evaluation checklist, and provider structure are baked into the code and seed data, not abstracted behind configuration. The report headers are now the exception: they are generic by default and fully configuration-driven (§2).
 
-Adapting it for a different CAA is a **configuration and data exercise, not a rewrite**: nothing here requires touching the domain model, the finding/CAP/follow-up lifecycle, the USOAP citation chain, or any webscript's business logic. But it does touch **all six repos**, and some of the substitutions below have real one-way consequences (see §3's warning about document IDs). Budget more than an afternoon — the effort table in §9 gives a per-item estimate, but plan on this being a multi-day project for a first adaptation, most of it in §4 (rebuilding the CAP checklist) and §6 (populating your own national regulation catalog).
+Adapting it for a different CAA is a **configuration and data exercise, not a rewrite**: nothing here requires touching the domain model, the finding/CAP/follow-up lifecycle, the USOAP citation chain, or any webscript's business logic. But it does touch **all six repos**, and some of the substitutions below have real one-way consequences (see §3's warning about document IDs). Budget more than an afternoon — the effort table in §10 gives a per-item estimate, but plan on this being a multi-day project for a first adaptation, most of it in §4 (rebuilding the CAP checklist) and §6 (populating your own national regulation catalog).
 
 Sections 2–7 are ordered easiest-to-hardest, so start at the top and stop whenever the remaining sections don't apply to your authority yet (e.g., you can run a fully working demo after §2 alone, with the reports already carrying your name and logo while everything else still shows the reference data).
 
@@ -183,7 +183,75 @@ you got it right.
 
 ---
 
-## 9. Summary table
+## 9. Where your users come from
+
+*Like §8, a deployment decision rather than a substitution — and like §8, it has a
+default that works, so you can leave it alone.*
+
+**You do not need an identity provider.** The platform authenticates against
+Alfresco, and that is the permanent default, not a stepping stone. An authority
+that runs no IdP is the shape this is built for; an authority that runs one can
+put it in front, and neither is the lesser case.
+
+| | No external IdP (**default**) | Existing IdP (**configured**) |
+|---|---|---|
+| Who authenticates the user | Alfresco | Your IdP |
+| Who holds the groups | Alfresco | Alfresco |
+| Who enforces document permissions | Alfresco | Alfresco |
+| Field app at sync time | Alfresco password prompt | Device-code flow |
+| Extra services you operate | none | your own |
+
+**Only the left column is built.** The right column is a decided design
+(`An ideal production configuration.md` §6.9 and ADR-002), not shipped code — do
+not plan an adaptation around it without scoping that work first. What the
+decision buys you today is a guarantee about the seam: whatever an IdP is
+eventually wired to, Alfresco stays the group store and the only thing that
+enforces document permissions, so the adaptation below does not become obsolete.
+
+**What you actually adapt: the group names.** Roles are not assigned in the
+application. They come from Alfresco group membership, translated by the
+PostgreSQL table `alfresco_group_role_map` (group name → role, `is_active`,
+`priority`). The reference deployment seeds seven mappings, all using IDAC's
+`U-VSO-*` convention:
+
+| Alfresco group | Role | Seeded in |
+|---|---|---|
+| `U-VSO-IN_Admin` | `admin` | `migrations/0003_group_role_mappings.sql` |
+| `U-VSO-IN_Inspector` | `inspector` | `0003` |
+| `U-VSO-PI_PlanInspeccion` | `planner` | `0003` |
+| `U-VSO-IN_Reporter` | `reporter` | `0003` |
+| `U-VSO-IN_Assigner` | `assigner` | `0003` |
+| `U-VSO-FN_CAPEntry` | `cap_entry` | `0003` |
+| `U-VSO-IN_ClosureReviewer` | `closure_reviewer` | `0002_closure_reviewer_role.sql` |
+
+If your authority already has group names of its own, map those instead — add
+rows rather than renaming Alfresco's groups to match ours. Unknown groups grant
+no roles, so an incomplete mapping fails closed: the user logs in and can do
+nothing, which is the safe direction. Users must log out and back in for a
+mapping change to take effect; roles are cached in the session.
+
+**The trap: an application role is not an Alfresco permission.** These are two
+separate enforcement points. `compliance_web` checks the role, and Alfresco
+independently checks the document ACL against that user's own session. A user
+with a mapped role but no repository grant logs in, passes every screen, and
+takes a 403 on the first write. Granting repository access is a separate step —
+`scripts/seed-demo-identities.sh` in `compliance_cmis` shows both halves (site
+membership plus the folder ACL) and is the thing to copy when you provision real
+inspectors. Test a new user by having them **create** a finding, not by having
+them open one; the read-only check passes while the writing case fails.
+
+**To adapt**: create your groups in Alfresco, add a row per group to
+`alfresco_group_role_map`, and grant each group site membership plus folder
+permissions the way `seed-demo-identities.sh` does. Walkthrough and
+troubleshooting: `compliance_web/docs/auth/ALFRESCO_ROLE_SETUP.md`.
+
+**Effort: low to moderate** — trivial if you adopt the `U-VSO-*` names as they
+ship, moderate if you map your own, and the repository-grant step is the part
+that is easy to forget and hard to diagnose.
+
+---
+
+## 10. Summary table
 
 | # | What | File(s) | Repo | Effort |
 |---|---|---|---|---|
@@ -194,6 +262,7 @@ you got it right.
 | 6 | Regulation catalog | `Normativa`/`Reglamento` entity data via `data-packs/{Reglamento,Normativa}.csv` (or the admin UI; no schema change) | atrocore-docker | Low (mechanism), scales with corpus size |
 | 7 | Site/folder naming | `scripts/bootstrap-site-content.sh`; `webscripts/common/vso-paths.lib.js`; inlined copies (`npm run verify:paths` finds them) | compliance_cmis | Involved (inconsistent parameterization) |
 | 8 | **Alert destination** (nothing ships configured — see §8) | `observability/alertmanager/alertmanager.yml`; `ALERTMANAGER_CONFIG` | atrocore-docker | Low |
+| 9 | **Group-to-role mapping** (identity; no IdP required — see §9) | `alfresco_group_role_map` rows via `migrations/`; `scripts/seed-demo-identities.sh` as the grant template | compliance_web; compliance_cmis | Low to moderate |
 
 A CAA's technical lead can scope their own adaptation project from this table alone, without reading all six repos first.
 
@@ -201,6 +270,6 @@ A CAA's technical lead can scope their own adaptation project from this table al
 
 ## See also
 
-- `An ideal production configuration.md` (repo root) — the target production architecture (Vault, Keycloak, PostgreSQL replication, container hardening). None of it exists yet; read it once your adaptation is working and you're planning a real deployment, not before.
+- `An ideal production configuration.md` (repo root) — the target production architecture and the P3 hardening programme. Much of it has since landed (secrets, container hardening, a TLS edge, backup/restore, observability); Vault, OIDC and PostgreSQL replication have not. Read it once your adaptation is working and you're planning a real deployment, not before.
 - Several of the demo's known open items are relevant to an adaptation effort — most notably, the Share smart-folder creation step is still manual (§7.9 of the runbook). See `RELEASE_READINESS_CHECKLIST.md` (repo root) and `CLAUDE.md`'s known-limitations summary for the full list.
 - `FOOTPRINT_AUDIT.md` (repo root) — hardware sizing (8 GB RAM minimum, 16 GB recommended) before you provision anything.
