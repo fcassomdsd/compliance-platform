@@ -16,3 +16,11 @@
 /.e2e-tools/
 /.footprint-audit/
 /.glab-config/
+
+# backup sets produced by atrocore-docker/scripts/backup-platform.sh, whose
+# default destination is this directory. They are database dumps, physical
+# base backups and the Alfresco content store -- hundreds of MB of binary,
+# containing whatever the running instance held. They were committed here
+# once, by a `git add -A` in this repo right after a backup run, and caught
+# before anything was pushed.
+backups/
