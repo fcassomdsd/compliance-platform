@@ -800,9 +800,35 @@ on the MANIFEST parser below.
   publishes them as an artifact. **Still not measured on production-sized data**, which is the
   part no arithmetic replaces — the projection is explicitly labelled as arithmetic on one
   measurement.
-- **Client-side encryption is not implemented.** Required before trusting a third-party
-  destination, and it carries a key-escrow decision: an encrypted backup with a lost key is not
-  a backup.
+- ~~Client-side encryption is not implemented.~~ **Done (2026-09-30), public-key.**
+  `BACKUP_AGE_RECIPIENT` encrypts every file with `age` before a destination driver sees it, so
+  an offsite copy is ciphertext and nothing else — the MANIFEST included, since it names every
+  file and carries plaintext hashes. The host holds only the **public** key: it can make backups
+  and cannot read any of them, including its own history, so taking the server does not also
+  take the backups. `push` refuses if the escrowed private key is present here, and
+  `preflight-secrets.sh --production` refuses a configured destination with no recipient.
+
+  Two design points worth keeping. **Verification needs no key** — each set carries a plaintext
+  index of *ciphertext* checksums, so an offsite copy's integrity can be audited on a schedule
+  without an escrow retrieval; an integrity check that requires one will not be run. And **local
+  sets stay plaintext on purpose**, so the same-host restore keeps the 1m40s RTO measured in
+  §5.2 rather than waiting on escrow. The threat addressed is the copy held by someone else; a
+  stolen backup volume is a different decision and this is not it.
+
+  **Escrow is configurable as two keys, not one.** `BACKUP_AGE_RECIPIENT` takes a list and any
+  one matching private key opens a set, so the recommended shape is an *operations* key in the
+  organisation's vault (routine restores, the quarterly drill) plus a *break-glass* key on sealed
+  paper or split across officers (a real disaster, under a signed procedure). Either rotates
+  independently. A single recipient warns rather than fails, because one key is a single point of
+  failure in the one situation where you cannot afford one. Rotation has a tail: a set stays
+  encrypted to the keys it was made with, so escrow must retain every key still covering a set
+  inside the retention window.
+
+  **The key-escrow decision stays with the deploying authority** and is the part that matters —
+  an encrypted backup whose key is lost is not a backup. Runbook §7.15 says to test the
+  retrieval, not just the encryption: quarterly, someone who did not create the key follows the
+  written procedure, retrieves it, and decrypts a set taken *that quarter*, timed — because the
+  retrieval time is part of the offsite RTO.
 - ~~`restore:verify` has no schedule, and does not route through an offsite destination.~~ **Both
   were already true and this bullet was stale.** A weekly schedule exists (Sundays 03:00 UTC, on
   `develop`), and the job has routed through an offsite destination since that work landed —
